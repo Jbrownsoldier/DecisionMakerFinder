@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Decision Maker Finder</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f4f6f9;
+      color: #1a1a2e;
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 40px 16px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+      width: 100%;
+      max-width: 660px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #fff;
+      padding: 28px 32px 22px;
+    }
+    .card-header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+    .card-header p  { font-size: 13px; color: #a0aec0; margin-top: 4px; }
+
+    .card-body { padding: 28px 32px; }
+
+    /* Upload zone */
+    .upload-zone {
+      border: 2px dashed #cbd5e0;
+      border-radius: 10px;
+      padding: 36px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      background: #f8fafc;
+      position: relative;
+    }
+    .upload-zone:hover, .upload-zone.drag-over {
+      border-color: #4f46e5;
+      background: #eef2ff;
+    }
+    .upload-zone input[type="file"] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+    .upload-icon { font-size: 36px; margin-bottom: 10px; }
+    .upload-zone .label { font-size: 15px; font-weight: 600; color: #374151; }
+    .upload-zone .sublabel { font-size: 13px; color: #9ca3af; margin-top: 4px; }
+    .upload-zone .file-selected {
+      font-size: 14px; color: #4f46e5; font-weight: 600; margin-top: 8px;
+    }
+
+    /* Settings box */
+    .settings-box {
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 18px 20px;
+      margin-top: 20px;
+      background: #fafafa;
+    }
+    .settings-box .section-title {
+      font-size: 12px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.8px; color: #6b7280; margin-bottom: 14px;
+    }
+
+    /* Toggle row */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .toggle-label-group { flex: 1; }
+    .toggle-label-group .name {
+      font-size: 14px; font-weight: 600; color: #1f2937;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .toggle-label-group .description {
+      font-size: 12px; color: #6b7280; margin-top: 2px; line-height: 1.5;
+    }
+    .badge-cost {
+      display: inline-block;
+      background: #d1fae5; color: #065f46;
+      font-size: 11px; font-weight: 600;
+      padding: 2px 8px; border-radius: 20px;
+      margin-left: 4px;
+    }
+    .badge-free {
+      display: inline-block;
+      background: #e0e7ff; color: #3730a3;
+      font-size: 11px; font-weight: 600;
+      padding: 2px 8px; border-radius: 20px;
+      margin-left: 4px;
+    }
+
+    /* Toggle switch */
+    .switch { position: relative; display: inline-block; width: 46px; height: 26px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; cursor: pointer; inset: 0;
+      background: #d1d5db; border-radius: 26px; transition: 0.3s;
+    }
+    .slider::before {
+      content: ""; position: absolute;
+      width: 20px; height: 20px; left: 3px; bottom: 3px;
+      background: white; border-radius: 50%; transition: 0.3s;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    }
+    input:checked + .slider { background: #4f46e5; }
+    input:checked + .slider::before { transform: translateX(20px); }
+
+    /* API key field */
+    .api-key-wrap {
+      margin-top: 14px;
+      display: none; /* shown via JS when toggle is ON */
+    }
+    .api-key-wrap label {
+      font-size: 13px; font-weight: 600; color: #374151; display: block; margin-bottom: 6px;
+    }
+    .api-key-wrap input[type="text"],
+    .api-key-wrap input[type="password"] {
+      width: 100%; padding: 10px 12px;
+      border: 1px solid #d1d5db; border-radius: 8px;
+      font-size: 13px; font-family: monospace;
+      outline: none; transition: border-color 0.2s;
+      background: #fff;
+    }
+    .api-key-wrap input:focus { border-color: #4f46e5; }
+    .api-key-hint {
+      font-size: 11px; color: #9ca3af; margin-top: 5px;
+      line-height: 1.5;
+    }
+
+    /* Run button */
+    .btn-run {
+      margin-top: 22px;
+      width: 100%;
+      padding: 13px;
+      background: #4f46e5;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+      letter-spacing: 0.2px;
+    }
+    .btn-run:hover:not(:disabled) { background: #4338ca; }
+    .btn-run:active:not(:disabled) { transform: scale(0.98); }
+    .btn-run:disabled { background: #a5b4fc; cursor: not-allowed; }
+
+    /* Progress section */
+    .progress-section {
+      margin-top: 24px;
+      display: none;
+    }
+    .progress-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 8px;
+    }
+    .progress-header .label { font-size: 13px; font-weight: 600; color: #374151; }
+    .progress-header .count { font-size: 13px; color: #6b7280; }
+
+    .progress-bar-track {
+      background: #e5e7eb; border-radius: 8px; height: 10px; overflow: hidden;
+    }
+    .progress-bar-fill {
+      background: linear-gradient(90deg, #4f46e5, #818cf8);
+      height: 100%; border-radius: 8px;
+      width: 0%; transition: width 0.4s ease;
+    }
+
+    .progress-company {
+      font-size: 12px; color: #6b7280; margin-top: 6px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    .stats-row {
+      display: flex; gap: 16px; margin-top: 12px;
+    }
+    .stat-pill {
+      flex: 1; border-radius: 8px; padding: 10px 14px;
+      text-align: center;
+    }
+    .stat-pill.found { background: #d1fae5; }
+    .stat-pill.not-found { background: #fee2e2; }
+    .stat-pill .stat-number {
+      font-size: 22px; font-weight: 800;
+    }
+    .stat-pill.found .stat-number { color: #065f46; }
+    .stat-pill.not-found .stat-number { color: #991b1b; }
+    .stat-pill .stat-label { font-size: 11px; font-weight: 600; color: #6b7280; margin-top: 2px; }
+
+    /* Error banner */
+    .error-banner {
+      display: none;
+      margin-top: 16px;
+      background: #fee2e2; border: 1px solid #fca5a5;
+      border-radius: 8px; padding: 12px 14px;
+      font-size: 13px; color: #7f1d1d;
+    }
+
+    /* Download button */
+    .btn-download {
+      display: none;
+      margin-top: 18px;
+      width: 100%;
+      padding: 13px;
+      background: #10b981;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      text-decoration: none;
+      text-align: center;
+      transition: background 0.2s;
+    }
+    .btn-download:hover { background: #059669; }
+
+    .divider { height: 1px; background: #f0f0f0; margin: 20px 0; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="card-header">
+    <h1>Decision Maker Finder</h1>
+    <p>Upload a CSV of companies → get decision makers + 10 email candidates per company</p>
+  </div>
+
+  <div class="card-body">
+
+    <!-- Upload zone -->
+    <div class="upload-zone" id="uploadZone">
+      <input type="file" id="csvFile" accept=".csv" />
+      <div class="upload-icon">📂</div>
+      <div class="label">Drop your CSV here or click to browse</div>
+      <div class="sublabel">Requires: company_name + domain or website columns</div>
+      <div class="file-selected" id="fileLabel" style="display:none"></div>
+    </div>
+
+    <!-- Settings -->
+    <div class="settings-box">
+      <div class="section-title">Free Data Sources</div>
+
+      <!-- Yelp toggle -->
+      <div class="toggle-row">
+        <div class="toggle-label-group">
+          <div class="name">🔍 Yelp Business Search <span class="badge-free">Free</span></div>
+          <div class="description">
+            Searches Yelp for the business owner's name. Works best for local service
+            businesses (plumbers, roofers, restaurants). Adds ~1–2 sec per company.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="yelpToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- DDG toggle -->
+      <div class="toggle-row" style="margin-top: 16px;">
+        <div class="toggle-label-group">
+          <div class="name">🌐 Web Search (DuckDuckGo) <span class="badge-free">Free</span></div>
+          <div class="description">
+            Searches the web for news and directories that mention the decision maker by name.
+            Good for finding owners who aren't listed on their own website.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="ddgToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- BBB toggle -->
+      <div class="toggle-row" style="margin-top: 16px;">
+        <div class="toggle-label-group">
+          <div class="name">📋 BBB Business Search <span class="badge-free">Free</span></div>
+          <div class="description">
+            Looks up verified owner/principal names from the Better Business Bureau.
+            High accuracy when found — BBB verifies during accreditation. US only.
+            Adds ~1–2 sec per company.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="bbbToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- HomeStars toggle -->
+      <div class="toggle-row" style="margin-top: 16px;">
+        <div class="toggle-label-group">
+          <div class="name">🏠 HomeStars.ca Search <span class="badge-free">Free · 🇨🇦 Canada</span></div>
+          <div class="description">
+            Searches HomeStars — Canada's #1 home services directory for plumbers,
+            roofers, electricians and other trades. Business profiles often show the
+            owner's name. Best source for Canadian local trades.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="homestarsToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- YellowPages CA toggle -->
+      <div class="toggle-row" style="margin-top: 16px;">
+        <div class="toggle-label-group">
+          <div class="name">📞 YellowPages Canada <span class="badge-free">Free · 🇨🇦 Canada</span></div>
+          <div class="description">
+            Searches YellowPages.ca for the business contact or owner name.
+            Better Canadian local coverage than Yelp — especially for trades,
+            contractors, and small service businesses.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="yellowpagesToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- Google Maps owner response toggle -->
+      <div class="toggle-row" style="margin-top: 16px;">
+        <div class="toggle-label-group">
+          <div class="name">🗺️ Google Maps Owner Responses <span class="badge-free">Free</span></div>
+          <div class="description">
+            Finds the owner's name from Google Maps review responses — business owners
+            frequently reply to reviews signing with their name ("Hi, I'm John Smith,
+            the owner..."). These responses are indexed and searchable.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="googleMapsToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- LinkedIn via Google toggle -->
+      <div class="toggle-row" style="margin-top: 16px;">
+        <div class="toggle-label-group">
+          <div class="name">💼 LinkedIn via Google <span class="badge-free">Free</span></div>
+          <div class="description">
+            Searches LinkedIn personal profiles via DuckDuckGo — no LinkedIn account or
+            API needed. Result titles like "John Smith - Owner at Acme Plumbing" give
+            you the name <em>and</em> title in one shot. Highest-confidence external
+            source for decision maker discovery. Adds ~1–2 sec per company.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="linkedinToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- Web Email Discovery toggle -->
+      <div class="toggle-row" style="margin-top: 16px;">
+        <div class="toggle-label-group">
+          <div class="name">📧 Web Email Discovery <span class="badge-free">Free</span></div>
+          <div class="description">
+            Searches the web for any email at the company's domain mentioned on third-party
+            sites (e.g. forums, press releases, directories). Replicates Hunter.io's
+            approach in real-time — dramatically improves email pattern detection.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="webEmailToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- GitHub Email toggle -->
+      <div class="toggle-row" style="margin-top: 16px;">
+        <div class="toggle-label-group">
+          <div class="name">🐙 GitHub Email Search <span class="badge-free">Free</span></div>
+          <div class="description">
+            Finds company email addresses committed to public GitHub repos (README files,
+            package.json, etc.). Best for tech companies, agencies, and SaaS businesses.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="githubEmailToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- WHOIS toggle -->
+      <div class="toggle-row" style="margin-top: 16px;">
+        <div class="toggle-label-group">
+          <div class="name">📝 WHOIS Email Lookup <span class="badge-free">Free</span></div>
+          <div class="description">
+            Checks the domain registration record for the registrant's email. When the
+            owner used their work email (e.g. jsmith@acme.com), we extract it as a real
+            pattern example. Works on ~20–30% of domains without privacy protection.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="whoisToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- SMTP Email Verification toggle -->
+      <div class="toggle-row" style="margin-top: 16px;">
+        <div class="toggle-label-group">
+          <div class="name">✉️ SMTP Email Verification <span class="badge-free">Free</span></div>
+          <div class="description">
+            Connects to the company's actual mail server and confirms whether each
+            email candidate exists — without sending a message. Returns a single
+            <strong>verified deliverable address</strong>. Adds ~3–8 sec per company.
+            Works on ~70% of domains (catch-all servers like Google Workspace are
+            reported as "unverifiable"). <strong>This is how AnyMailFinder works.</strong>
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="smtpVerifyToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="divider" style="margin: 16px 0;"></div>
+      <div class="section-title">JS Rendering (Advanced)</div>
+
+      <!-- Playwright toggle -->
+      <div class="toggle-row">
+        <div class="toggle-label-group">
+          <div class="name">🚀 JS Rendering (Playwright) <span class="badge-free">Free</span></div>
+          <div class="description">
+            Launches a real Chromium browser to render JavaScript-heavy sites (React, Vue,
+            Wix, Squarespace). Biggest single improvement — fixes ~40–50% of sites that
+            currently return empty content.<br>
+            <strong>Requires one-time setup in Terminal:</strong><br>
+            <code style="font-size:11px; background:#f3f4f6; padding:2px 6px; border-radius:4px;">
+              pip3 install playwright &amp;&amp; playwright install chromium
+            </code><br>
+            Slows processing to ~5–8 sec/company. Leave OFF if not installed.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="playwrightToggle" />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="divider" style="margin: 16px 0;"></div>
+      <div class="section-title">AI Fallback</div>
+
+      <div class="toggle-row">
+        <div class="toggle-label-group">
+          <div class="name">
+            🤖 AI Fallback (Claude Haiku)
+            <span class="badge-free" id="badgeFree">Free — AI Off</span>
+            <span class="badge-cost" id="badgeCost" style="display:none">~$0.001–$0.003/company</span>
+          </div>
+          <div class="description">
+            When <strong>OFF</strong>: uses free heuristics only.<br>
+            When <strong>ON</strong>: AI reads the page when all free methods fail. Only charges when needed.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="aiToggle" />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- API key (shown only when AI toggle is ON) -->
+      <div class="api-key-wrap" id="apiKeyWrap">
+        <label for="apiKeyInput">Anthropic API Key</label>
+        <input type="password" id="apiKeyInput" placeholder="sk-ant-api03-..." value="{{ default_api_key }}" />
+        <div class="api-key-hint">
+          Your key is used for this run only and never stored or logged.
+          Get a free key at console.anthropic.com &rarr; API Keys.
+        </div>
+      </div>
+    </div>
+
+    <!-- Run button -->
+    <button class="btn-run" id="btnRun" disabled>▶ Run</button>
+
+    <!-- Error banner -->
+    <div class="error-banner" id="errorBanner"></div>
+
+    <div class="divider" id="progressDivider" style="display:none"></div>
+
+    <!-- Progress section -->
+    <div class="progress-section" id="progressSection">
+      <div class="progress-header">
+        <span class="label" id="progressLabel">Processing...</span>
+        <span class="count" id="progressCount">0 / 0</span>
+      </div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="progressFill"></div>
+      </div>
+      <div class="progress-company" id="progressCompany">Starting...</div>
+
+      <div class="stats-row">
+        <div class="stat-pill found">
+          <div class="stat-number" id="statFound">0</div>
+          <div class="stat-label">Decision Makers Found</div>
+        </div>
+        <div class="stat-pill not-found">
+          <div class="stat-number" id="statNotFound">0</div>
+          <div class="stat-label">Not Found</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Download button -->
+    <button class="btn-download" id="btnDownload">⬇ Download Output CSV</button>
+
+  </div>
+</div>
+
+<script>
+  // ---------------------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------------------
+  let currentJobId = null;
+  let pollInterval = null;
+  let selectedFile = null;
+
+  // ---------------------------------------------------------------------------
+  // Element refs
+  // ---------------------------------------------------------------------------
+  const csvFile           = document.getElementById("csvFile");
+  const uploadZone        = document.getElementById("uploadZone");
+  const fileLabel         = document.getElementById("fileLabel");
+  const yelpToggle        = document.getElementById("yelpToggle");
+  const ddgToggle         = document.getElementById("ddgToggle");
+  const bbbToggle         = document.getElementById("bbbToggle");
+  const homestarsToggle   = document.getElementById("homestarsToggle");
+  const yellowpagesToggle = document.getElementById("yellowpagesToggle");
+  const googleMapsToggle  = document.getElementById("googleMapsToggle");
+  const linkedinToggle    = document.getElementById("linkedinToggle");
+  const webEmailToggle    = document.getElementById("webEmailToggle");
+  const githubEmailToggle = document.getElementById("githubEmailToggle");
+  const whoisToggle       = document.getElementById("whoisToggle");
+  const smtpVerifyToggle  = document.getElementById("smtpVerifyToggle");
+  const playwrightToggle  = document.getElementById("playwrightToggle");
+  const aiToggle          = document.getElementById("aiToggle");
+  const apiKeyWrap     = document.getElementById("apiKeyWrap");
+  const apiKeyInput    = document.getElementById("apiKeyInput");
+  const badgeFree      = document.getElementById("badgeFree");
+  const badgeCost      = document.getElementById("badgeCost");
+  const btnRun         = document.getElementById("btnRun");
+  const errorBanner    = document.getElementById("errorBanner");
+  const progressDiv    = document.getElementById("progressDivider");
+  const progressSec    = document.getElementById("progressSection");
+  const progressLabel  = document.getElementById("progressLabel");
+  const progressCount  = document.getElementById("progressCount");
+  const progressFill   = document.getElementById("progressFill");
+  const progressCo     = document.getElementById("progressCompany");
+  const statFound      = document.getElementById("statFound");
+  const statNotFound   = document.getElementById("statNotFound");
+  const btnDownload    = document.getElementById("btnDownload");
+
+  // ---------------------------------------------------------------------------
+  // File selection
+  // ---------------------------------------------------------------------------
+  csvFile.addEventListener("change", () => {
+    if (csvFile.files.length > 0) {
+      selectedFile = csvFile.files[0];
+      fileLabel.textContent = "✓ " + selectedFile.name;
+      fileLabel.style.display = "block";
+      btnRun.disabled = false;
+    }
+  });
+
+  // Drag and drop
+  uploadZone.addEventListener("dragover", (e) => { e.preventDefault(); uploadZone.classList.add("drag-over"); });
+  uploadZone.addEventListener("dragleave", () => uploadZone.classList.remove("drag-over"));
+  uploadZone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    uploadZone.classList.remove("drag-over");
+    const files = e.dataTransfer.files;
+    if (files.length > 0 && files[0].name.endsWith(".csv")) {
+      selectedFile = files[0];
+      fileLabel.textContent = "✓ " + selectedFile.name;
+      fileLabel.style.display = "block";
+      btnRun.disabled = false;
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // AI toggle
+  // ---------------------------------------------------------------------------
+  aiToggle.addEventListener("change", () => {
+    const on = aiToggle.checked;
+    apiKeyWrap.style.display = on ? "block" : "none";
+    badgeFree.style.display  = on ? "none"  : "inline-block";
+    badgeCost.style.display  = on ? "inline-block" : "none";
+  });
+
+  // ---------------------------------------------------------------------------
+  // Run
+  // ---------------------------------------------------------------------------
+  btnRun.addEventListener("click", async () => {
+    if (!selectedFile) return;
+    hideError();
+
+    // Validate API key if AI is on
+    if (aiToggle.checked && !apiKeyInput.value.trim()) {
+      showError("Please enter your Anthropic API key to use AI fallback.");
+      return;
+    }
+
+    btnRun.disabled = true;
+    btnRun.textContent = "⏳ Starting...";
+    btnDownload.style.display = "none";
+
+    const formData = new FormData();
+    formData.append("csv_file",        selectedFile);
+    formData.append("use_ai",          aiToggle.checked          ? "true" : "false");
+    formData.append("api_key",         apiKeyInput.value.trim());
+    formData.append("use_yelp",         yelpToggle.checked        ? "true" : "false");
+    formData.append("use_ddg",          ddgToggle.checked         ? "true" : "false");
+    formData.append("use_bbb",          bbbToggle.checked         ? "true" : "false");
+    formData.append("use_homestars",    homestarsToggle.checked   ? "true" : "false");
+    formData.append("use_yellowpages",  yellowpagesToggle.checked ? "true" : "false");
+    formData.append("use_google_maps",  googleMapsToggle.checked  ? "true" : "false");
+    formData.append("use_linkedin",     linkedinToggle.checked    ? "true" : "false");
+    formData.append("use_web_email",    webEmailToggle.checked    ? "true" : "false");
+    formData.append("use_github_email", githubEmailToggle.checked ? "true" : "false");
+    formData.append("use_whois",        whoisToggle.checked       ? "true" : "false");
+    formData.append("use_smtp_verify",  smtpVerifyToggle.checked  ? "true" : "false");
+    formData.append("use_playwright",   playwrightToggle.checked  ? "true" : "false");
+
+    try {
+      const resp = await fetch("/run", { method: "POST", body: formData });
+      const data = await resp.json();
+
+      if (!resp.ok || data.error) {
+        showError(data.error || "Failed to start job.");
+        resetRunButton();
+        return;
+      }
+
+      currentJobId = data.job_id;
+      showProgress(data.total);
+      startPolling();
+
+    } catch (err) {
+      showError("Network error: " + err.message);
+      resetRunButton();
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Polling
+  // ---------------------------------------------------------------------------
+  function startPolling() {
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = setInterval(pollProgress, 1500);
+  }
+
+  async function pollProgress() {
+    if (!currentJobId) return;
+    try {
+      const resp = await fetch("/progress/" + currentJobId);
+      const data = await resp.json();
+      if (data.error) return;
+
+      const pct = data.total > 0 ? Math.round((data.current / data.total) * 100) : 0;
+      progressFill.style.width = pct + "%";
+      progressCount.textContent = data.current + " / " + data.total;
+      progressCo.textContent = data.company ? "Currently: " + data.company : "";
+      statFound.textContent    = data.found;
+      statNotFound.textContent = data.not_found;
+
+      if (data.status === "done") {
+        clearInterval(pollInterval);
+        pollInterval = null;
+        progressLabel.textContent = "✓ Complete!";
+        progressFill.style.width = "100%";
+        progressCo.textContent = "Finished processing " + data.total + " companies.";
+        btnRun.disabled = false;
+        btnRun.textContent = "▶ Run Again";
+        btnDownload.style.display = "block";
+        btnDownload.onclick = () => window.location.href = "/download/" + currentJobId;
+      } else if (data.status === "error") {
+        clearInterval(pollInterval);
+        pollInterval = null;
+        showError("Processing error: " + (data.error || "Unknown error"));
+        resetRunButton();
+      }
+    } catch (e) {
+      // Network hiccup — keep polling
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+  function showProgress(total) {
+    progressDiv.style.display   = "block";
+    progressSec.style.display   = "block";
+    progressLabel.textContent   = "Processing...";
+    progressCount.textContent   = "0 / " + total;
+    progressFill.style.width    = "0%";
+    progressCo.textContent      = "Starting...";
+    statFound.textContent       = "0";
+    statNotFound.textContent    = "0";
+    btnRun.textContent          = "⏳ Running...";
+  }
+
+  function showError(msg) {
+    errorBanner.textContent = "⚠ " + msg;
+    errorBanner.style.display = "block";
+  }
+
+  function hideError() {
+    errorBanner.style.display = "none";
+    errorBanner.textContent   = "";
+  }
+
+  function resetRunButton() {
+    btnRun.disabled    = false;
+    btnRun.textContent = "▶ Run";
+  }
+</script>
+</body>
+</html>

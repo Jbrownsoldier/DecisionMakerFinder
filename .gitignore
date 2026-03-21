@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.Python
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Environment / secrets
+.env
+.env.*
+*.key
+
+# Output files (contain scraped data — don't commit)
+output/
+*_output.csv
+*_results.csv
+
+# Claude internal metadata
+.claude/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

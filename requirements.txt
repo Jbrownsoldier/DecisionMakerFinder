@@ -1,0 +1,16 @@
+requests==2.32.3
+beautifulsoup4==4.12.3
+lxml==5.2.2
+tqdm==4.66.4
+flask==3.0.3
+anthropic==0.31.0
+dnspython==2.6.1
+python-whois==0.9.4
+
+# ---------------------------------------------------------------------------
+# Optional — JS Rendering via Playwright (biggest improvement for find rate)
+# Install once in Terminal AFTER running pip3 install -r requirements.txt:
+#   pip3 install playwright
+#   playwright install chromium
+# (~120 MB one-time Chromium download, ~5–8 sec per JS-rendered page)
+# ---------------------------------------------------------------------------
