@@ -6,6 +6,7 @@ flask==3.0.3
 anthropic==0.31.0
 dnspython==2.6.1
 python-whois==0.9.4
+openai>=1.0.0
 
 # ---------------------------------------------------------------------------
 # Optional — JS Rendering via Playwright (biggest improvement for find rate)

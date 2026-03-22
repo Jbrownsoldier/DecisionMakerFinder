@@ -43,6 +43,11 @@ PAGES_TO_TRY = [
     "/staff",
     "/people",
     "/who-we-are",
+    "/executive-team",
+    "/staff-directory",
+    "/management-team",
+    "/team-members",
+    "/founders",
     "/contact",
     "/contact-us",
 ]
@@ -56,6 +61,8 @@ PRIORITY_PAGES = {
     "/leadership",
     "/management",
     "/meet-the-team",
+    "/executive-team",
+    "/founders",
 }
 
 # ---------------------------------------------------------------------------
@@ -78,6 +85,11 @@ TIER_1_ROLES = [
     "partner",
     "principal",
     "proprietor",
+    "cto",
+    "chief technology officer",
+    "cfo",
+    "chief financial officer",
+    "chairman",
 ]
 
 TIER_2_ROLES = [
@@ -184,24 +196,38 @@ YELP_REQUEST_TIMEOUT = 8
 DDG_REQUEST_TIMEOUT  = 8
 
 # How many DuckDuckGo result snippets to scan per company
-DDG_MAX_RESULTS = 3
+DDG_MAX_RESULTS = 7
 
 # ---------------------------------------------------------------------------
-# AI Fallback settings (Claude Haiku)
+# AI Fallback settings
 # ---------------------------------------------------------------------------
 
 # Default state — overridden per-run by the UI toggle.
 # Set to True here if you want it always on when using the CLI.
 USE_AI_FALLBACK = False
 
+# AI provider: "claude" uses Anthropic Haiku. "openrouter" uses OpenRouter GPT-4o Mini.
+AI_PROVIDER = "claude"
+
 # Your Anthropic API key. Can be set here or entered in the web UI each run.
 ANTHROPIC_API_KEY = ""
 
-# Only call Haiku if page text is at least this many characters
+# Your OpenRouter API key. Can be set here or entered in the web UI each run.
+OPENROUTER_API_KEY = ""
+
+# Score threshold below which AI fallback is invoked (when use_ai=True).
+# Raised from SCORE_THRESHOLD_WEAK (20) so AI fires whenever no STRONG
+# deterministic match was found — not only on near-zero scores.
+SCORE_THRESHOLD_AI = 50
+
+# Only call AI if page text is at least this many characters
 HAIKU_MIN_TEXT_LENGTH = 300
 
-# Max characters of page text sent to Haiku (keeps token cost low)
+# Max characters of page text sent to Claude Haiku (keeps token cost low)
 HAIKU_TEXT_LIMIT = 3000
+
+# Max characters of page text sent to OpenRouter (stricter cap to save tokens)
+OPENROUTER_TEXT_LIMIT = 2000
 
 # ---------------------------------------------------------------------------
 # V5 Free additions
@@ -282,6 +308,37 @@ USE_JINA_READER = True
 
 # Per-request timeout in seconds for Jina.ai Reader calls
 JINA_REQUEST_TIMEOUT = 15
+
+# Fetch full LinkedIn profile text via Jina after finding the URL via DDG.
+# Improves name/title accuracy significantly. Jina renders the JS-heavy page.
+# Can be toggled per-run via the UI.
+USE_LINKEDIN_JINA_FETCH = True
+
+# Search Google's Knowledge Panel for business owner info via Jina.
+# Fetches google.com/search?q=company+city and parses the business card.
+# Can be toggled per-run via the UI.
+USE_GOOGLE_BUSINESS_SEARCH = True
+
+# Search Facebook business pages for owner/founder mentions via Jina.
+# Best for small local businesses that manage their own Facebook page.
+# Can be toggled per-run via the UI.
+USE_FACEBOOK_SEARCH = True
+
+# Search press release sites (PRNewswire, BusinessWire, GlobeNewswire) for
+# executive appointment announcements. Best for mid-market and larger companies.
+# Can be toggled per-run via the UI.
+USE_PRESS_RELEASE_SEARCH = True
+
+# Search Crunchbase for founder/CEO data.
+# Best for tech, SaaS, and startup companies.
+# Can be toggled per-run via the UI.
+USE_CRUNCHBASE_SEARCH = True
+
+# Request timeouts for new V9 sources
+GOOGLE_BUSINESS_REQUEST_TIMEOUT = 15
+FACEBOOK_REQUEST_TIMEOUT         = 10
+CRUNCHBASE_REQUEST_TIMEOUT       = 10
+PRESS_RELEASE_REQUEST_TIMEOUT    = 8
 
 # ---------------------------------------------------------------------------
 # V7: SMTP email verification + direct email matching

@@ -16,6 +16,7 @@
 
 import re
 import time
+from urllib.parse import quote
 
 import requests
 from bs4 import BeautifulSoup
@@ -98,6 +99,26 @@ _BUSINESS_WORDS = {
     # US geography that commonly appears in company names
     "america", "american", "national", "united",
 }
+
+
+def _fetch_via_jina(url: str, timeout: int = None) -> str:
+    """
+    Fetch a URL via Jina.ai Reader (r.jina.ai) and return plain text.
+    Jina renders JS-heavy pages using a headless browser, which is needed
+    for LinkedIn, Google Maps, and Facebook pages.
+    Returns '' on any failure.
+    """
+    try:
+        resp = requests.get(
+            f"https://r.jina.ai/{url}",
+            headers={**_HEADERS, "Accept": "text/plain"},
+            timeout=timeout or config.JINA_REQUEST_TIMEOUT,
+        )
+        if resp.status_code == 200:
+            return resp.text[:10000]
+    except Exception:
+        pass
+    return ""
 
 
 def _is_plausible_person_name(name: str) -> bool:
@@ -1179,6 +1200,26 @@ def search_linkedin_google(company_name: str, city: str = "", state: str = "") -
             if not owner_name:
                 continue
 
+            # --- Jina profile fetch: validate and improve name/title ---
+            if config.USE_LINKEDIN_JINA_FETCH and href:
+                jina_text = _fetch_via_jina(href, timeout=config.JINA_REQUEST_TIMEOUT)
+                if jina_text and len(jina_text) > 80:
+                    lines = [ln.strip() for ln in jina_text.split("\n") if ln.strip()]
+                    # First non-empty line from a LinkedIn profile is usually the full name
+                    if lines and _is_plausible_person_name(lines[0]):
+                        owner_name = lines[0]
+                    # Second line is often "Title at Company" or "Title | Company"
+                    if len(lines) > 1:
+                        role_line = lines[1]
+                        role_match = re.match(
+                            r"^([^|@\n,]{3,60})(?:\s+at\s+|\s*\|\s*|\s*,\s*).+",
+                            role_line, re.I
+                        )
+                        if role_match:
+                            candidate_role = role_match.group(1).strip()
+                            if _ROLE_RE.search(candidate_role) and len(candidate_role) < 80:
+                                owner_role = candidate_role
+
             return {
                 "linkedin_owner_found": "yes",
                 "linkedin_owner_name": owner_name,
@@ -1190,3 +1231,461 @@ def search_linkedin_google(company_name: str, city: str = "", state: str = "") -
 
     except Exception:
         return _empty_linkedin()
+
+
+# ---------------------------------------------------------------------------
+# Google Business Profile / Knowledge Panel search  [V9]
+# ---------------------------------------------------------------------------
+
+def _empty_google_business() -> dict:
+    return {
+        "google_business_owner_found": "no",
+        "google_business_owner_name": "",
+        "google_business_snippet": "",
+    }
+
+
+def search_google_business(company_name: str, city: str = "", state: str = "") -> dict:
+    """
+    Find the business owner via Google's Knowledge Panel / Business Profile.
+
+    Fetches google.com/search?q=company+city via Jina.ai to get the rendered
+    Knowledge Panel, which often contains the business description and owner name.
+
+    Falls back to DDG snippet parsing if Jina fails.
+
+    Args:
+        company_name: The business name to search for
+        city:         City to narrow the search
+        state:        Province/state to narrow the search
+
+    Returns dict: google_business_owner_found, google_business_owner_name,
+                  google_business_snippet
+    Fails gracefully — never raises an exception.
+    """
+    if not company_name:
+        return _empty_google_business()
+
+    try:
+        query_parts = [company_name]
+        if city:
+            query_parts.append(city)
+        if state:
+            query_parts.append(state)
+        query_str = " ".join(query_parts)
+
+        # Strategy A: Jina-rendered Google search (gets Knowledge Panel)
+        google_url = f"https://www.google.com/search?q={quote(query_str)}"
+        jina_text = _fetch_via_jina(google_url, timeout=config.GOOGLE_BUSINESS_REQUEST_TIMEOUT)
+
+        context_phrases = [
+            "owner:",
+            "founded by",
+            "owned by",
+            "managed by",
+            "proprietor",
+            "meet the owner",
+            "business owner",
+        ]
+
+        owner_name = ""
+        snippet = ""
+
+        if jina_text and len(jina_text) > 100:
+            text_lower = jina_text.lower()
+            for phrase in context_phrases:
+                idx = text_lower.find(phrase)
+                if idx == -1:
+                    continue
+                window_start = max(0, idx - 20)
+                window_end   = min(len(jina_text), idx + 250)
+                window = jina_text[window_start:window_end]
+                for m in _NAME_RE.finditer(window):
+                    candidate = m.group(0)
+                    if _is_plausible_person_name(candidate):
+                        owner_name = candidate
+                        snippet = window[:200].strip()
+                        break
+                if owner_name:
+                    break
+
+        if owner_name:
+            return {
+                "google_business_owner_found": "yes",
+                "google_business_owner_name": owner_name,
+                "google_business_snippet": snippet,
+            }
+
+        # Strategy B: DDG search for Google Business listing snippets
+        location_part = f' "{city}"' if city else ""
+        ddg_query = (
+            f'"{company_name}"{location_part} '
+            f'(owner OR founder OR CEO OR president) '
+            f'site:maps.google.com OR site:google.com/maps'
+        )
+
+        resp = requests.get(
+            "https://html.duckduckgo.com/html/",
+            params={"q": ddg_query},
+            headers={**_HEADERS, "Referer": "https://duckduckgo.com/"},
+            timeout=config.DDG_REQUEST_TIMEOUT,
+        )
+
+        if resp.status_code != 200:
+            return _empty_google_business()
+
+        soup = BeautifulSoup(resp.text, "lxml")
+        result_divs = soup.find_all("div", class_=re.compile(r"result", re.I))
+
+        for result in result_divs[:config.DDG_MAX_RESULTS]:
+            snippet_el = result.find(class_=re.compile(r"snippet", re.I))
+            if not snippet_el:
+                snippet_el = result.find("td")
+            if not snippet_el:
+                continue
+            snippet_text = snippet_el.get_text(" ", strip=True)
+            if len(snippet_text) < 20 or not _ROLE_RE.search(snippet_text):
+                continue
+            for nm in _NAME_RE.finditer(snippet_text):
+                candidate = nm.group(0)
+                if _is_plausible_person_name(candidate):
+                    return {
+                        "google_business_owner_found": "yes",
+                        "google_business_owner_name": candidate,
+                        "google_business_snippet": snippet_text[:200],
+                    }
+
+        return _empty_google_business()
+
+    except Exception:
+        return _empty_google_business()
+
+
+# ---------------------------------------------------------------------------
+# Facebook Business page owner search  [V9]
+# ---------------------------------------------------------------------------
+
+def _empty_facebook() -> dict:
+    return {
+        "facebook_owner_found": "no",
+        "facebook_owner_name": "",
+        "facebook_source_url": "",
+    }
+
+
+def search_facebook_business(company_name: str, city: str = "", state: str = "") -> dict:
+    """
+    Find the business owner from the company's Facebook Business page.
+
+    Many small business owners manage their own Facebook page and mention
+    their name in the About section or pinned posts.
+
+    Strategy:
+      1. DDG search: site:facebook.com "company" "city"
+      2. Find first facebook.com/pg/ or facebook.com/{slug} URL
+      3. Fetch the /about section via Jina.ai
+      4. Look for owner/founder name near ownership context keywords
+
+    Args:
+        company_name: The business name to search for
+        city:         City to narrow the search
+        state:        Province/state to narrow the search
+
+    Returns dict: facebook_owner_found, facebook_owner_name, facebook_source_url
+    Fails gracefully — never raises an exception.
+    """
+    if not company_name:
+        return _empty_facebook()
+
+    try:
+        location_part = f' "{city}"' if city else ""
+        query = f'site:facebook.com "{company_name}"{location_part}'
+
+        resp = requests.get(
+            "https://html.duckduckgo.com/html/",
+            params={"q": query},
+            headers={**_HEADERS, "Referer": "https://duckduckgo.com/"},
+            timeout=config.DDG_REQUEST_TIMEOUT,
+        )
+
+        if resp.status_code != 200:
+            return _empty_facebook()
+
+        soup = BeautifulSoup(resp.text, "lxml")
+        fb_url = None
+
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if "uddg=" in href:
+                from urllib.parse import unquote, urlparse, parse_qs
+                try:
+                    parsed = parse_qs(urlparse(href).query)
+                    href = unquote(parsed.get("uddg", [""])[0])
+                except Exception:
+                    pass
+            if "facebook.com/" in href and not any(x in href for x in [
+                "facebook.com/login", "facebook.com/signup", "facebook.com/search",
+                "facebook.com/share", "facebook.com/sharer",
+            ]):
+                if re.search(r"facebook\.com/[A-Za-z0-9._-]{3,}", href):
+                    fb_url = href.split("?")[0]  # strip query params
+                    break
+
+        if not fb_url:
+            return _empty_facebook()
+
+        # Fetch the About page via Jina
+        about_url = fb_url.rstrip("/") + "/about"
+        jina_text = _fetch_via_jina(about_url, timeout=config.FACEBOOK_REQUEST_TIMEOUT)
+
+        if not jina_text or len(jina_text) < 50:
+            return _empty_facebook()
+
+        context_phrases = [
+            "founded by",
+            "owned by",
+            "meet the owner",
+            "owner:",
+            "business owner",
+            "managed by",
+            "started by",
+            "proprietor",
+        ]
+
+        owner_name = ""
+        for phrase in context_phrases:
+            idx = jina_text.lower().find(phrase)
+            if idx == -1:
+                continue
+            window_start = max(0, idx - 20)
+            window_end   = min(len(jina_text), idx + 250)
+            window = jina_text[window_start:window_end]
+            for m in _NAME_RE.finditer(window):
+                candidate = m.group(0)
+                if _is_plausible_person_name(candidate):
+                    owner_name = candidate
+                    break
+            if owner_name:
+                break
+
+        if not owner_name:
+            return _empty_facebook()
+
+        return {
+            "facebook_owner_found": "yes",
+            "facebook_owner_name": owner_name,
+            "facebook_source_url": fb_url,
+        }
+
+    except Exception:
+        return _empty_facebook()
+
+
+# ---------------------------------------------------------------------------
+# Press release mining (PRNewswire / BusinessWire / GlobeNewswire)  [V9]
+# ---------------------------------------------------------------------------
+
+def _empty_press_release() -> dict:
+    return {
+        "press_release_owner_found": "no",
+        "press_release_owner_name": "",
+        "press_release_owner_title": "",
+        "press_release_snippet": "",
+    }
+
+
+def search_press_releases(company_name: str, city: str = "", state: str = "") -> dict:
+    """
+    Search press release sites for executive appointment announcements.
+
+    Companies announce new CEOs, founders, and presidents via press releases on
+    PRNewswire, BusinessWire, and GlobeNewswire — all indexed by DDG.
+
+    Strategy:
+      1. DDG: "Company" (CEO OR founder OR president OR "named" OR "appoints")
+         site:prnewswire.com OR site:businesswire.com OR site:globenewswire.com
+      2. Parse result snippets for role keyword + proper name
+
+    Args:
+        company_name: The business name to search for
+        city:         City (optional, improves precision)
+        state:        State/province (optional)
+
+    Returns dict: press_release_owner_found, press_release_owner_name,
+                  press_release_owner_title, press_release_snippet
+    Fails gracefully — never raises an exception.
+    """
+    if not company_name:
+        return _empty_press_release()
+
+    try:
+        location_part = f' "{city}"' if city else ""
+        query = (
+            f'"{company_name}"{location_part} '
+            f'(CEO OR founder OR president OR "named" OR "appoints" OR owner) '
+            f'(site:prnewswire.com OR site:businesswire.com OR site:globenewswire.com)'
+        )
+
+        resp = requests.get(
+            "https://html.duckduckgo.com/html/",
+            params={"q": query},
+            headers={**_HEADERS, "Referer": "https://duckduckgo.com/"},
+            timeout=config.PRESS_RELEASE_REQUEST_TIMEOUT,
+        )
+
+        if resp.status_code != 200:
+            return _empty_press_release()
+
+        soup = BeautifulSoup(resp.text, "lxml")
+        result_divs = soup.find_all("div", class_=re.compile(r"result", re.I))
+
+        for result in result_divs[:config.DDG_MAX_RESULTS]:
+            snippet_el = result.find(class_=re.compile(r"snippet", re.I))
+            if not snippet_el:
+                snippet_el = result.find("td")
+            if not snippet_el:
+                continue
+
+            snippet_text = snippet_el.get_text(" ", strip=True)
+            if len(snippet_text) < 20 or not _ROLE_RE.search(snippet_text):
+                continue
+
+            role_m = _ROLE_RE.search(snippet_text)
+            role = role_m.group(0).title() if role_m else ""
+
+            for nm in _NAME_RE.finditer(snippet_text):
+                candidate = nm.group(0)
+                if _is_plausible_person_name(candidate):
+                    return {
+                        "press_release_owner_found": "yes",
+                        "press_release_owner_name": candidate,
+                        "press_release_owner_title": role,
+                        "press_release_snippet": snippet_text[:200],
+                    }
+
+        return _empty_press_release()
+
+    except Exception:
+        return _empty_press_release()
+
+
+# ---------------------------------------------------------------------------
+# Crunchbase founder/CEO search  [V9]
+# ---------------------------------------------------------------------------
+
+def _empty_crunchbase() -> dict:
+    return {
+        "crunchbase_owner_found": "no",
+        "crunchbase_owner_name": "",
+        "crunchbase_owner_title": "",
+        "crunchbase_source_url": "",
+    }
+
+
+def search_crunchbase(company_name: str, city: str = "", state: str = "") -> dict:
+    """
+    Search Crunchbase for the company's founder or CEO.
+
+    Crunchbase lists founders, CEOs, and board members for millions of companies.
+    Most relevant for tech, SaaS, and startup companies.
+
+    Strategy:
+      1. DDG: site:crunchbase.com "company" (founder OR CEO OR owner)
+      2. Follow first crunchbase.com/organization/ link
+      3. Fetch via Jina.ai and parse the "Founders" / "Leadership" section
+      4. Fallback: parse DDG title directly for name + role
+
+    Args:
+        company_name: The business name to search for
+        city:         City (optional)
+        state:        State/province (optional)
+
+    Returns dict: crunchbase_owner_found, crunchbase_owner_name,
+                  crunchbase_owner_title, crunchbase_source_url
+    Fails gracefully — never raises an exception.
+    """
+    if not company_name:
+        return _empty_crunchbase()
+
+    try:
+        location_part = f' "{city}"' if city else ""
+        query = f'site:crunchbase.com/organization "{company_name}"{location_part}'
+
+        resp = requests.get(
+            "https://html.duckduckgo.com/html/",
+            params={"q": query},
+            headers={**_HEADERS, "Referer": "https://duckduckgo.com/"},
+            timeout=config.DDG_REQUEST_TIMEOUT,
+        )
+
+        if resp.status_code != 200:
+            return _empty_crunchbase()
+
+        soup = BeautifulSoup(resp.text, "lxml")
+        cb_url = None
+
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if "uddg=" in href:
+                from urllib.parse import unquote, urlparse, parse_qs
+                try:
+                    parsed = parse_qs(urlparse(href).query)
+                    href = unquote(parsed.get("uddg", [""])[0])
+                except Exception:
+                    pass
+            if "crunchbase.com/organization/" in href:
+                cb_url = href.split("?")[0]
+                break
+
+        if not cb_url:
+            return _empty_crunchbase()
+
+        # Fetch Crunchbase organization page via Jina
+        jina_text = _fetch_via_jina(cb_url, timeout=config.CRUNCHBASE_REQUEST_TIMEOUT)
+
+        if jina_text and len(jina_text) > 100:
+            founder_labels = ["founder", "co-founder", "ceo", "chief executive", "owner"]
+            lines = [ln.strip() for ln in jina_text.split("\n") if ln.strip()]
+
+            for i, line in enumerate(lines):
+                line_lower = line.lower()
+                if any(lbl in line_lower for lbl in founder_labels):
+                    # Check adjacent lines for a plausible person name
+                    for offset in [-1, 1, -2, 2]:
+                        idx = i + offset
+                        if 0 <= idx < len(lines):
+                            candidate = lines[idx].strip()
+                            if _is_plausible_person_name(candidate):
+                                # Extract title from the label line
+                                role_m = _ROLE_RE.search(line)
+                                title = role_m.group(0).title() if role_m else "Founder"
+                                return {
+                                    "crunchbase_owner_found": "yes",
+                                    "crunchbase_owner_name": candidate,
+                                    "crunchbase_owner_title": title,
+                                    "crunchbase_source_url": cb_url,
+                                }
+
+        # Fallback: parse the DDG result title for name + role
+        for result in soup.find_all("div", class_=re.compile(r"result", re.I)):
+            title_el = result.find("a", class_=re.compile(r"result__a", re.I)) or result.find("a", href=True)
+            if not title_el:
+                continue
+            title_text = title_el.get_text(" ", strip=True)
+            if not _ROLE_RE.search(title_text):
+                continue
+            for nm in _NAME_RE.finditer(title_text):
+                candidate = nm.group(0)
+                if _is_plausible_person_name(candidate):
+                    role_m = _ROLE_RE.search(title_text)
+                    return {
+                        "crunchbase_owner_found": "yes",
+                        "crunchbase_owner_name": candidate,
+                        "crunchbase_owner_title": role_m.group(0).title() if role_m else "Founder",
+                        "crunchbase_source_url": cb_url or "",
+                    }
+
+        return _empty_crunchbase()
+
+    except Exception:
+        return _empty_crunchbase()

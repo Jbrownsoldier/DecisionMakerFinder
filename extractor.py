@@ -28,7 +28,7 @@ from cleaner import clean_name_for_display, clean_name_for_email, split_full_nam
 class ExtractedPerson:
     full_name: str = ""
     title: str = ""
-    source: str = ""            # schema_org | html_card | text_regex | claude_haiku
+    source: str = ""            # schema_org | html_card | text_regex | claude_haiku | openrouter
     confidence: str = ""        # high | medium | low
     score: int = 0
     score_reason: list = field(default_factory=list)  # human-readable scoring log
@@ -791,6 +791,135 @@ def _extract_with_haiku(pages: list, api_key: str) -> list[ExtractedPerson]:
         return []
 
 
+def _build_openrouter_text(pages: list) -> str:
+    """
+    Extract the most relevant page text to send to OpenRouter.
+    Uses a stricter character cap than Haiku to reduce token cost.
+    """
+    priority_texts = []
+    other_texts = []
+    for page in pages:
+        if not page.text:
+            continue
+        if page.page_path in config.PRIORITY_PAGES:
+            priority_texts.append(page.text)
+        else:
+            other_texts.append(page.text)
+
+    combined = " ".join(priority_texts + other_texts)
+    return combined[:config.OPENROUTER_TEXT_LIMIT]
+
+
+def _extract_with_openrouter(pages: list, api_key: str) -> list[ExtractedPerson]:
+    """
+    Use OpenRouter GPT-4o Mini to extract decision maker candidates from page text.
+    Uses an OpenAI-compatible client pointed at https://openrouter.ai/api/v1.
+    Only called when use_ai=True, ai_provider="openrouter", and score is below threshold.
+    Returns a list of ExtractedPerson objects that enter the normal scoring pool.
+    """
+    if not api_key:
+        return []
+
+    text = _build_openrouter_text(pages)
+    if len(text) < config.HAIKU_MIN_TEXT_LENGTH:
+        return []
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+        )
+
+        prompt = (
+            "Look at this company website text and identify the most senior decision makers "
+            "(Owner, Founder, CEO, President, Managing Director, Partner, etc.).\n\n"
+            "Return ONLY valid JSON — no other text. Use this exact format:\n"
+            "{\n"
+            '  "candidates": [\n'
+            '    {"name": "Full Name", "title": "Job Title", "confidence": "high|medium|low", '
+            '"reason": "one sentence why"}\n'
+            "  ],\n"
+            '  "best_choice": {"name": "Full Name", "title": "Job Title", '
+            '"confidence": "high|medium|low", "reason": "one sentence why"}\n'
+            "}\n\n"
+            "Rules:\n"
+            "- Only include real named people with leadership titles\n"
+            "- Do not include support staff, developers, or admin roles\n"
+            "- If no decision maker is found, return empty candidates list and "
+            'best_choice with empty name and title\n'
+            "- Maximum 3 candidates\n\n"
+            "Website text:\n" + text
+        )
+
+        response = client.chat.completions.create(
+            model="openai/gpt-4o-mini",
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        raw = response.choices[0].message.content.strip()
+
+        # Strip markdown code fences if present
+        raw = raw.strip("`").strip()
+        if raw.startswith("json"):
+            raw = raw[4:].strip()
+
+        data = json.loads(raw)
+        candidates_data = data.get("candidates", [])
+
+        best = data.get("best_choice", {})
+        if best.get("name") and not any(
+            c.get("name", "").lower() == best["name"].lower()
+            for c in candidates_data
+        ):
+            candidates_data.append(best)
+
+        persons = []
+        for c in candidates_data:
+            name = str(c.get("name", "")).strip()
+            title = str(c.get("title", "")).strip()
+            or_confidence = str(c.get("confidence", "medium")).strip()
+            reason = str(c.get("reason", "")).strip()
+
+            if name and len(name.split()) >= 2 and title:
+                p = ExtractedPerson(
+                    full_name=clean_name_for_display(name),
+                    title=title,
+                    source="openrouter",
+                    confidence=or_confidence,
+                    matched_page="openrouter_fallback",
+                    matched_snippet=reason[:150],
+                )
+                best_priority_path = next(
+                    (pg.page_path for pg in pages if pg.page_path in config.PRIORITY_PAGES),
+                    "/"
+                )
+                _score_candidate(
+                    p, best_priority_path,
+                    has_generic_email_nearby=False,
+                    in_heading_context=False,
+                    name_title_close=True,
+                )
+                persons.append(p)
+
+        return persons
+
+    except Exception:
+        # Silently fail — never crash the whole pipeline on an OpenRouter error
+        return []
+
+
+def _extract_with_ai(pages: list, api_key: str, ai_provider: str) -> list[ExtractedPerson]:
+    """
+    Dispatcher: calls the correct AI backend based on ai_provider.
+    ai_provider: "claude" → Anthropic Haiku  |  "openrouter" → OpenRouter GPT-4o Mini
+    """
+    if ai_provider == "openrouter":
+        return _extract_with_openrouter(pages, api_key)
+    return _extract_with_haiku(pages, api_key)
+
+
 # ---------------------------------------------------------------------------
 # Deduplication helpers
 # ---------------------------------------------------------------------------
@@ -831,6 +960,7 @@ def extract_from_pages(
     pages: list,
     use_ai: bool = False,
     api_key: str = "",
+    ai_provider: str = "claude",
 ) -> ExtractionResult:
     """
     Run the full extraction pipeline across all fetched pages.
@@ -840,8 +970,8 @@ def extract_from_pages(
     high-confidence structured data).
 
     After all deterministic strategies complete, if no candidate meets the
-    minimum score threshold AND use_ai=True, Claude Haiku is called once as
-    a final fallback.
+    strong score threshold AND use_ai=True, the configured AI provider is called
+    once as a final fallback.
 
     Returns an ExtractionResult with the highest-scoring primary candidate,
     an optional backup, and a full list of all candidates for debugging.
@@ -915,15 +1045,15 @@ def extract_from_pages(
                     all_candidates.append(fp)
 
     # -----------------------------------------------------------------------
-    # Phase 2: Claude Haiku fallback (only if needed)
+    # Phase 2: AI fallback (only if no strong deterministic match found)
     # -----------------------------------------------------------------------
     best_deterministic_score = max((p.score for p in all_candidates), default=0)
-    if use_ai and api_key and best_deterministic_score < config.SCORE_THRESHOLD_WEAK:
-        haiku_persons = _extract_with_haiku(pages, api_key)
+    if use_ai and api_key and best_deterministic_score < config.SCORE_THRESHOLD_AI:
+        ai_persons = _extract_with_ai(pages, api_key, ai_provider)
         existing_names = {p.full_name.lower() for p in all_candidates}
-        for hp in haiku_persons:
-            if hp.full_name.lower() not in existing_names:
-                all_candidates.append(hp)
+        for ap in ai_persons:
+            if ap.full_name.lower() not in existing_names:
+                all_candidates.append(ap)
 
     # -----------------------------------------------------------------------
     # Phase 3: select primary and backup from all scored candidates
@@ -1023,6 +1153,7 @@ def extract_decision_maker(
     text: str,
     use_ai: bool = False,
     api_key: str = "",
+    ai_provider: str = "claude",
 ) -> ExtractionResult:
     """
     Backward-compatibility wrapper around extract_from_pages().
@@ -1031,4 +1162,4 @@ def extract_decision_maker(
     """
     from scraper import PageResult
     page = PageResult(url="", page_path="/", html=html, text=text, website_status="ok")
-    return extract_from_pages([page], use_ai=use_ai, api_key=api_key)
+    return extract_from_pages([page], use_ai=use_ai, api_key=api_key, ai_provider=ai_provider)

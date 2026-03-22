@@ -368,6 +368,68 @@
         </label>
       </div>
 
+      <!-- Google Business Profile toggle -->
+      <div class="toggle-row" style="margin-top: 16px;">
+        <div class="toggle-label-group">
+          <div class="name">🗺️ Google Business Profile <span class="badge-free">Free</span></div>
+          <div class="description">
+            Fetches the Google Knowledge Panel for the company via Jina.ai to extract the
+            business owner or contact name. Works well when Google has indexed the business
+            listing. Adds ~2–4 sec per company.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="googleBusinessToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- Facebook Business toggle -->
+      <div class="toggle-row" style="margin-top: 16px;">
+        <div class="toggle-label-group">
+          <div class="name">📘 Facebook Business <span class="badge-free">Free</span></div>
+          <div class="description">
+            Finds the company's Facebook Business page via DuckDuckGo, then reads the
+            About section for owner/founder mentions. Best for small local businesses
+            that manage their own Facebook page. Adds ~2–3 sec per company.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="facebookToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- Press Release Mining toggle -->
+      <div class="toggle-row" style="margin-top: 16px;">
+        <div class="toggle-label-group">
+          <div class="name">📰 Press Release Mining <span class="badge-free">Free</span></div>
+          <div class="description">
+            Searches PRNewswire, BusinessWire, and GlobeNewswire for executive appointment
+            announcements. Best for mid-market and larger companies. Adds ~1–2 sec per company.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="pressReleaseToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- Crunchbase toggle -->
+      <div class="toggle-row" style="margin-top: 16px;">
+        <div class="toggle-label-group">
+          <div class="name">🚀 Crunchbase <span class="badge-free">Free</span></div>
+          <div class="description">
+            Searches Crunchbase for the company's founders and C-suite executives.
+            Best for tech, SaaS, and startup companies. Adds ~2–3 sec per company.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="crunchbaseToggle" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
       <!-- Web Email Discovery toggle -->
       <div class="toggle-row" style="margin-top: 16px;">
         <div class="toggle-label-group">
@@ -463,13 +525,13 @@
       <div class="toggle-row">
         <div class="toggle-label-group">
           <div class="name">
-            🤖 AI Fallback (Claude Haiku)
+            🤖 AI Fallback
             <span class="badge-free" id="badgeFree">Free — AI Off</span>
             <span class="badge-cost" id="badgeCost" style="display:none">~$0.001–$0.003/company</span>
           </div>
           <div class="description">
             When <strong>OFF</strong>: uses free heuristics only.<br>
-            When <strong>ON</strong>: AI reads the page when all free methods fail. Only charges when needed.
+            When <strong>ON</strong>: AI reads the page when free methods don't find a strong match. Only charges when needed.
           </div>
         </div>
         <label class="switch">
@@ -478,13 +540,38 @@
         </label>
       </div>
 
-      <!-- API key (shown only when AI toggle is ON) -->
+      <!-- AI provider + key (shown only when AI toggle is ON) -->
       <div class="api-key-wrap" id="apiKeyWrap">
-        <label for="apiKeyInput">Anthropic API Key</label>
-        <input type="password" id="apiKeyInput" placeholder="sk-ant-api03-..." value="{{ default_api_key }}" />
-        <div class="api-key-hint">
-          Your key is used for this run only and never stored or logged.
-          Get a free key at console.anthropic.com &rarr; API Keys.
+        <div style="margin-bottom: 10px;">
+          <label style="font-weight:600; font-size:13px; display:block; margin-bottom:6px;">AI Provider</label>
+          <label style="margin-right:18px; font-size:13px; cursor:pointer;">
+            <input type="radio" name="ai_provider_radio" value="claude" id="providerClaude" checked />
+            Claude Haiku (Anthropic)
+          </label>
+          <label style="font-size:13px; cursor:pointer;">
+            <input type="radio" name="ai_provider_radio" value="openrouter" id="providerOpenrouter" />
+            GPT-4o Mini (OpenRouter)
+          </label>
+        </div>
+
+        <!-- Claude key input -->
+        <div id="claudeKeyWrap">
+          <label for="apiKeyInput">Anthropic API Key</label>
+          <input type="password" id="apiKeyInput" placeholder="sk-ant-api03-..." value="{{ default_api_key }}" />
+          <div class="api-key-hint">
+            Your key is used for this run only and never stored or logged.
+            Get a free key at console.anthropic.com &rarr; API Keys.
+          </div>
+        </div>
+
+        <!-- OpenRouter key input -->
+        <div id="openrouterKeyWrap" style="display:none;">
+          <label for="openrouterKeyInput">OpenRouter API Key</label>
+          <input type="password" id="openrouterKeyInput" placeholder="sk-or-v1-..." value="{{ default_openrouter_key }}" />
+          <div class="api-key-hint">
+            Your key is used for this run only and never stored or logged.
+            Get a key at openrouter.ai &rarr; Keys. GPT-4o Mini costs ~$0.00015/1K tokens.
+          </div>
         </div>
       </div>
     </div>
@@ -546,8 +633,12 @@
   const homestarsToggle   = document.getElementById("homestarsToggle");
   const yellowpagesToggle = document.getElementById("yellowpagesToggle");
   const googleMapsToggle  = document.getElementById("googleMapsToggle");
-  const linkedinToggle    = document.getElementById("linkedinToggle");
-  const webEmailToggle    = document.getElementById("webEmailToggle");
+  const linkedinToggle          = document.getElementById("linkedinToggle");
+  const googleBusinessToggle    = document.getElementById("googleBusinessToggle");
+  const facebookToggle          = document.getElementById("facebookToggle");
+  const pressReleaseToggle      = document.getElementById("pressReleaseToggle");
+  const crunchbaseToggle        = document.getElementById("crunchbaseToggle");
+  const webEmailToggle          = document.getElementById("webEmailToggle");
   const githubEmailToggle = document.getElementById("githubEmailToggle");
   const whoisToggle       = document.getElementById("whoisToggle");
   const smtpVerifyToggle  = document.getElementById("smtpVerifyToggle");
@@ -606,6 +697,15 @@
     badgeCost.style.display  = on ? "inline-block" : "none";
   });
 
+  // AI provider radio toggle
+  document.querySelectorAll('input[name="ai_provider_radio"]').forEach(radio => {
+    radio.addEventListener("change", () => {
+      const isOpenRouter = document.getElementById("providerOpenrouter").checked;
+      document.getElementById("claudeKeyWrap").style.display     = isOpenRouter ? "none"  : "block";
+      document.getElementById("openrouterKeyWrap").style.display = isOpenRouter ? "block" : "none";
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // Run
   // ---------------------------------------------------------------------------
@@ -614,9 +714,16 @@
     hideError();
 
     // Validate API key if AI is on
-    if (aiToggle.checked && !apiKeyInput.value.trim()) {
-      showError("Please enter your Anthropic API key to use AI fallback.");
-      return;
+    if (aiToggle.checked) {
+      const isOpenRouter = document.getElementById("providerOpenrouter").checked;
+      if (isOpenRouter && !document.getElementById("openrouterKeyInput").value.trim()) {
+        showError("Please enter your OpenRouter API key to use AI fallback.");
+        return;
+      }
+      if (!isOpenRouter && !apiKeyInput.value.trim()) {
+        showError("Please enter your Anthropic API key to use AI fallback.");
+        return;
+      }
     }
 
     btnRun.disabled = true;
@@ -627,14 +734,20 @@
     formData.append("csv_file",        selectedFile);
     formData.append("use_ai",          aiToggle.checked          ? "true" : "false");
     formData.append("api_key",         apiKeyInput.value.trim());
+    formData.append("ai_provider",        document.querySelector('input[name="ai_provider_radio"]:checked').value);
+    formData.append("openrouter_api_key", document.getElementById("openrouterKeyInput").value.trim());
     formData.append("use_yelp",         yelpToggle.checked        ? "true" : "false");
     formData.append("use_ddg",          ddgToggle.checked         ? "true" : "false");
     formData.append("use_bbb",          bbbToggle.checked         ? "true" : "false");
     formData.append("use_homestars",    homestarsToggle.checked   ? "true" : "false");
     formData.append("use_yellowpages",  yellowpagesToggle.checked ? "true" : "false");
     formData.append("use_google_maps",  googleMapsToggle.checked  ? "true" : "false");
-    formData.append("use_linkedin",     linkedinToggle.checked    ? "true" : "false");
-    formData.append("use_web_email",    webEmailToggle.checked    ? "true" : "false");
+    formData.append("use_linkedin",          linkedinToggle.checked       ? "true" : "false");
+    formData.append("use_google_business",   googleBusinessToggle.checked ? "true" : "false");
+    formData.append("use_facebook",          facebookToggle.checked       ? "true" : "false");
+    formData.append("use_press_releases",    pressReleaseToggle.checked   ? "true" : "false");
+    formData.append("use_crunchbase",        crunchbaseToggle.checked     ? "true" : "false");
+    formData.append("use_web_email",         webEmailToggle.checked       ? "true" : "false");
     formData.append("use_github_email", githubEmailToggle.checked ? "true" : "false");
     formData.append("use_whois",        whoisToggle.checked       ? "true" : "false");
     formData.append("use_smtp_verify",  smtpVerifyToggle.checked  ? "true" : "false");

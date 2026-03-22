@@ -11,9 +11,9 @@ A free, locally-run alternative to Hunter.io and AnyMailFinder. Upload a CSV of 
 Most email outreach tools charge $50–$200/month to find decision maker emails. This app replicates the same pipeline using 100% free sources:
 
 1. **Upload** a CSV of companies (company name + domain or website)
-2. **It searches** 11 data sources simultaneously to find the Owner/CEO/Founder
+2. **It searches** 15 data sources simultaneously to find the Owner/CEO/Founder
 3. **It verifies** which email address actually exists on the company's mail server
-4. **Download** a CSV with the confirmed decision maker name, verified email, and 79 data columns
+4. **Download** a CSV with the confirmed decision maker name, verified email, and 90+ data columns
 
 ---
 
@@ -33,18 +33,22 @@ python3 app.py
 
 ## Features Implemented
 
-### 11 Decision Maker Sources
+### 15 Decision Maker Sources
 
 | Source | Method | Best For | Est. Hit Rate |
 |---|---|---|---|
 | **Website Scraping** | Schema.org JSON-LD, HTML team cards, text regex, footer/copyright | Any company website | ~40% |
 | **Yelp Business Search** | Scrapes owner section on Yelp listing | US local service businesses | ~35% |
-| **DuckDuckGo SERP** | Searches news/directories for owner mentions | Any business with online presence | ~20% |
+| **DuckDuckGo SERP** | Searches news/directories for owner mentions (7 results scanned) | Any business with online presence | ~20% |
 | **BBB (Better Business Bureau)** | Verified principal name from accreditation record | US accredited businesses | ~50% when listed |
 | **HomeStars.ca** 🇨🇦 | Canada's #1 trades directory — "Meet the Owner" sections | Canadian plumbers, roofers, electricians | ~30% |
 | **YellowPages Canada** 🇨🇦 | YP.ca business listings contact name field | Canadian local service businesses | ~25% |
-| **Google Maps Owner Responses** | Owner self-introductions in review replies ("Hi, I'm John...") | Any business with Google reviews | ~20% |
-| **💼 LinkedIn via Google** | DDG `site:linkedin.com/in` title parsing — no account needed | Any business with LinkedIn presence | ~35–55% |
+| **Google Maps Owner Responses** | Owner self-introductions in review replies ("Hi, I'm John…") | Any business with Google reviews | ~20% |
+| **💼 LinkedIn via Google** | DDG `site:linkedin.com/in` + Jina profile fetch — no account needed | Any business with LinkedIn presence | ~40–60% |
+| **🗺️ Google Business Profile** | Jina-rendered Google Knowledge Panel parses owner/contact from listing | Any Google-indexed business | ~25–35% |
+| **📘 Facebook Business** | DDG finds Facebook page → Jina reads `/about` for owner mentions | Small local businesses with Facebook | ~20–30% |
+| **📰 Press Release Mining** | DDG targets PRNewswire, BusinessWire, GlobeNewswire for exec announcements | Mid-market & larger companies | ~15–25% |
+| **🚀 Crunchbase** | Jina-fetches organization page, parses Founders/Leadership section | Tech, SaaS, startups | ~30–50% |
 | **Web Email Discovery** | DDG `"@domain.com" -site:domain.com` finds emails on 3rd-party sites | All companies | ~20–30% |
 | **GitHub Email Search** | Finds work emails committed to public repos | Tech companies, agencies | ~10% |
 | **WHOIS Lookup** | Registrant email when it's at the company's own domain | Small businesses, owner-registered domains | ~20–30% |
@@ -90,11 +94,11 @@ Path 4 — No name found
 | **Jina.ai Reader** (free) | Static returns < 200 chars | ~2–4 sec | None — auto |
 | **Playwright** (optional) | Jina fails, still sparse | ~5–8 sec | `pip install playwright && playwright install chromium` |
 
-Jina.ai Reader automatically fixes React, Vue, Wix, and Squarespace sites that returned blank content before — no configuration required.
+Jina.ai Reader automatically fixes React, Vue, Wix, and Squarespace sites that returned blank content before — no configuration required. It is also used to fetch LinkedIn profiles, Facebook About pages, Google Knowledge Panels, and Crunchbase organization pages.
 
 ---
 
-### 79 Output Columns
+### 90+ Output Columns
 
 | Group | Columns | Contents |
 |---|---|---|
@@ -102,7 +106,7 @@ Jina.ai Reader automatically fixes React, Vue, Wix, and Squarespace sites that r
 | Decision maker | 8 | name, title, confidence, source, score, page found on |
 | Email | 15 | primary guess, SMTP verified email, direct email, pattern, catch-all flag, confidence |
 | Candidates | 10 | candidate_1 through candidate_10 |
-| Per-source | 33 | Yelp, DDG, BBB, HomeStars, YellowPages, Google Maps, LinkedIn, web email, GitHub, WHOIS |
+| Per-source (V4–V9) | 45 | Yelp, DDG, BBB, HomeStars, YellowPages, Google Maps, LinkedIn, Google Business, Facebook, Press Releases, Crunchbase, web email, GitHub, WHOIS |
 | Technical | 8 | website status, js_rendered (static/jina/playwright), notes |
 
 ---
@@ -143,7 +147,7 @@ ssh root@YOUR_VPS_IP "chmod +x deploy.sh && ./deploy.sh"
 
 | Metric | This App | AnyMailFinder / Hunter.io |
 |---|---|---|
-| Decision maker name found | ~65–75% | N/A (they take name as input) |
+| Decision maker name found | ~70–80% | N/A (they take name as input) |
 | Email candidate generated | 100% | 100% |
 | Email SMTP verified | ~50–55%* | ~70–80% |
 | Catch-all flagged | ✅ Yes | ✅ Yes |
@@ -200,21 +204,54 @@ playwright install chromium
 All settings are in `config.py`. Key options:
 
 ```python
-USE_YELP_SEARCH       = True   # Yelp business owner scraping
-USE_DDG_SEARCH        = True   # DuckDuckGo web search
-USE_BBB_SEARCH        = True   # Better Business Bureau
-USE_HOMESTARS_SEARCH  = True   # HomeStars.ca (Canada)
-USE_YELLOWPAGES_CA_SEARCH = True  # YellowPages Canada
-USE_GOOGLE_MAPS_SEARCH = True  # Google Maps owner responses
-USE_LINKEDIN_SEARCH   = True   # LinkedIn via Google
-USE_WEB_EMAIL_SEARCH  = True   # Web email discovery
-USE_GITHUB_EMAIL_SEARCH = True # GitHub code search
-USE_WHOIS_LOOKUP      = True   # WHOIS registrant email
-USE_JINA_READER       = True   # Jina.ai JS rendering (free)
-USE_PLAYWRIGHT        = False  # Playwright (requires install)
-USE_SMTP_VERIFY       = True   # SMTP email verification
-USE_AI_FALLBACK       = False  # Claude Haiku (requires API key)
+# Decision maker sources
+USE_YELP_SEARCH              = True   # Yelp business owner scraping
+USE_DDG_SEARCH               = True   # DuckDuckGo web search (7 results/query)
+USE_BBB_SEARCH               = True   # Better Business Bureau
+USE_HOMESTARS_SEARCH         = True   # HomeStars.ca (Canada)
+USE_YELLOWPAGES_CA_SEARCH    = True   # YellowPages Canada
+USE_GOOGLE_MAPS_SEARCH       = True   # Google Maps owner responses
+USE_LINKEDIN_SEARCH          = True   # LinkedIn via DDG
+USE_LINKEDIN_JINA_FETCH      = True   # Fetch full LinkedIn profile via Jina
+USE_GOOGLE_BUSINESS_SEARCH   = True   # Google Knowledge Panel via Jina
+USE_FACEBOOK_SEARCH          = True   # Facebook Business About page
+USE_PRESS_RELEASE_SEARCH     = True   # PRNewswire / BusinessWire / GlobeNewswire
+USE_CRUNCHBASE_SEARCH        = True   # Crunchbase founders/CEO
+# Email & verification
+USE_WEB_EMAIL_SEARCH         = True   # Web email discovery
+USE_GITHUB_EMAIL_SEARCH      = True   # GitHub code search
+USE_WHOIS_LOOKUP             = True   # WHOIS registrant email
+USE_JINA_READER              = True   # Jina.ai JS rendering (free)
+USE_PLAYWRIGHT               = False  # Playwright (requires install)
+USE_SMTP_VERIFY              = True   # SMTP email verification
+USE_AI_FALLBACK              = False  # Claude Haiku (requires API key)
 ```
+
+---
+
+## Changelog
+
+### V9 — New Sources + LinkedIn Profile Fetch
+- **4 new decision maker sources:** Google Business Profile, Facebook Business, Press Release Mining, Crunchbase
+- **LinkedIn Jina enhancement:** after finding a LinkedIn URL via DDG, fetches the full profile via Jina for more accurate name + title extraction
+- **DDG_MAX_RESULTS 3→7:** checks 2× more SERP snippets per query across all DDG-based sources
+- **12 new output columns** for the new sources
+- **90+ total output columns** (up from 79)
+- **15 total external sources** (up from 11)
+
+### V8 — LinkedIn via Google
+- LinkedIn personal profile discovery via DDG `site:linkedin.com/in` — no LinkedIn account or API needed
+
+### V6–V7 — Canadian Sources + Direct Email Match + SMTP
+- HomeStars.ca, YellowPages Canada, Google Maps owner response search
+- Direct email match when WHOIS/web/GitHub return a named email for the decision maker
+- SMTP verification with catch-all detection
+
+### V5 — Jina.ai + BBB + Web Email Discovery
+- Jina.ai Reader for JS-rendered websites
+- Better Business Bureau principal name lookup
+- Web email discovery via DDG third-party indexing
+- GitHub email search
 
 ---
 
@@ -233,18 +270,13 @@ A composite confidence percentage on every output row so you can filter by thres
 Feed bounce/open data back from your email sending tool to improve pattern ranking. If `first.last@` bounces 80% of the time for a certain domain provider, down-rank it. Over time the app learns which patterns are most reliable per industry and hosting type.
 
 ### 🌐 Bing Search API Fallback
-DuckDuckGo rate-limits under heavy load, which affects 7 features simultaneously. Bing Search API has a free tier (1,000 calls/month) and can serve as a fallback when DDG returns empty results. Eliminates the DDG throttling cascade.
+DuckDuckGo rate-limits under heavy load, which affects multiple features simultaneously. Bing Search API has a free tier (1,000 calls/month) and can serve as a fallback when DDG returns empty results.
 
 ### 🔐 HTTPS + Auth for VPS
 When running on a VPS accessible from the internet, add Nginx reverse proxy + Let's Encrypt TLS + simple password protection so the UI isn't open to the public. One-command setup with Certbot.
 
 ### 📱 Webhook / n8n Integration
 POST results to a webhook URL as each company completes, instead of waiting for the full CSV. Enables real-time integration with n8n, Make (Integromat), Zapier, or any CRM without polling.
-
-### 🇨🇦 More Canadian Sources
-- **Canada411** — residential/business directory with owner names
-- **Houzz** — Canadian contractors and home services
-- **Google Business Profile** — structured owner data via Places API free tier
 
 ### 📬 Email Warmup Integration
 After finding a verified email, automatically add it to an email warmup sequence (Instantly, Lemlist, Smartlead) via API. Closes the loop from discovery to outreach in one workflow.
@@ -256,9 +288,9 @@ After finding a verified email, automatically add it to an email warmup sequence
 ```
 DecisionMakerFinder/
 ├── app.py              # Flask web server + job queue
-├── main.py             # Pipeline orchestration (79 output columns)
+├── main.py             # Pipeline orchestration (90+ output columns)
 ├── scraper.py          # Website fetcher + Jina.ai + Playwright
-├── searcher.py         # All 11 external sources
+├── searcher.py         # All 15 external sources + Jina helper
 ├── extractor.py        # On-page name extraction (5 strategies + AI)
 ├── email_gen.py        # Email candidate generation + direct match
 ├── smtp_verify.py      # SMTP verification (check_smtp, detect_catch_all)

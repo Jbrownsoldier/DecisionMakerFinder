@@ -46,6 +46,8 @@ from searcher import (
     search_domain_emails_web, search_github_emails,
     search_homestars, search_yellowpages_ca, search_google_maps_owner,
     search_linkedin_google,
+    search_google_business, search_facebook_business,
+    search_press_releases, search_crunchbase,
 )
 
 
@@ -142,6 +144,19 @@ OUTPUT_COLUMNS = [
     "linkedin_owner_name",        # name extracted from LinkedIn profile title
     "linkedin_owner_title",       # job title from LinkedIn profile title
     "linkedin_source_url",        # linkedin.com/in/ profile URL
+    # --- V9 new sources ---
+    "google_business_owner_found",    # yes | no
+    "google_business_owner_name",     # owner name from Google Knowledge Panel
+    "facebook_owner_found",           # yes | no
+    "facebook_owner_name",            # owner name from Facebook About page
+    "facebook_source_url",            # Facebook page URL
+    "press_release_owner_found",      # yes | no
+    "press_release_owner_name",       # executive name from press release
+    "press_release_owner_title",      # title from press release
+    "crunchbase_owner_found",         # yes | no
+    "crunchbase_owner_name",          # founder/CEO name from Crunchbase
+    "crunchbase_owner_title",         # title from Crunchbase
+    "crunchbase_source_url",          # Crunchbase organization URL
     # --- V7 Direct email match ---
     "direct_email_found",         # yes | no  — discovered email matched decision maker name
     "direct_email",               # the actual email from WHOIS/web/GitHub (no guessing)
@@ -253,6 +268,8 @@ def process_row(
     row: dict,
     use_ai: bool = False,
     api_key: str = "",
+    ai_provider: str = "claude",
+    openrouter_key: str = "",
     use_yelp: bool = True,
     use_ddg: bool = True,
     use_bbb: bool = True,
@@ -264,22 +281,32 @@ def process_row(
     use_google_maps: bool = True,
     use_linkedin: bool = True,
     use_smtp_verify: bool = True,
+    use_google_business: bool = True,
+    use_facebook: bool = True,
+    use_press_releases: bool = True,
+    use_crunchbase: bool = True,
 ) -> dict:
     """
     Process a single company row end-to-end.
     Returns a fully-populated output dict (all OUTPUT_COLUMNS present).
 
-    use_ai:            if True, Claude Haiku is called as a final fallback.
-    api_key:           Anthropic API key (only used when use_ai=True).
-    use_yelp:          if True, search Yelp for the business owner name.
-    use_ddg:           if True, search DuckDuckGo for decision maker mentions.
-    use_bbb:           if True, scrape BBB for verified US business principal name.
-    use_web_email:     if True, search DDG for domain emails on third-party sites.
-    use_github_email:  if True, search GitHub code for domain emails.
-    use_whois:         if True, look up WHOIS registrant email for pattern hints.
-    use_homestars:     if True, search HomeStars.ca (Canadian trades directory).
-    use_yellowpages:   if True, search YellowPages Canada.
-    use_google_maps:   if True, search for owner via Google Maps review responses.
+    use_ai:              if True, AI is called as a final fallback.
+    api_key:             Anthropic API key (only used when ai_provider="claude").
+    ai_provider:         "claude" or "openrouter" — which AI backend to use.
+    openrouter_key:      OpenRouter API key (only used when ai_provider="openrouter").
+    use_yelp:            if True, search Yelp for the business owner name.
+    use_ddg:             if True, search DuckDuckGo for decision maker mentions.
+    use_bbb:             if True, scrape BBB for verified US business principal name.
+    use_web_email:       if True, search DDG for domain emails on third-party sites.
+    use_github_email:    if True, search GitHub code for domain emails.
+    use_whois:           if True, look up WHOIS registrant email for pattern hints.
+    use_homestars:       if True, search HomeStars.ca (Canadian trades directory).
+    use_yellowpages:     if True, search YellowPages Canada.
+    use_google_maps:     if True, search for owner via Google Maps review responses.
+    use_google_business: if True, search Google Knowledge Panel via Jina.
+    use_facebook:        if True, search Facebook Business pages for owner name.
+    use_press_releases:  if True, search PRNewswire/BusinessWire for executive mentions.
+    use_crunchbase:      if True, search Crunchbase for founder/CEO data.
     """
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -375,11 +402,13 @@ def process_row(
     output["observed_email_pattern"] = observed_pattern
     output["pattern_confidence"]     = pattern_confidence
 
-    # --- Step 6: Extract decision maker from website (Strategies 1–5 + optional Haiku) ---
+    # --- Step 6: Extract decision maker from website (Strategies 1–5 + optional AI) ---
+    effective_api_key = openrouter_key if ai_provider == "openrouter" else api_key
     extraction = extract_from_pages(
         pages=scrape.pages,
         use_ai=use_ai,
-        api_key=api_key,
+        api_key=effective_api_key,
+        ai_provider=ai_provider,
     )
 
     # --- Step 7: Yelp search for business owner name (free) ---
@@ -477,6 +506,58 @@ def process_row(
     output["linkedin_owner_title"] = linkedin_result.get("linkedin_owner_title", "")
     output["linkedin_source_url"]  = linkedin_result.get("linkedin_source_url", "")
 
+    # --- Step 8g: Google Business Profile / Knowledge Panel (V9) ---
+    google_business_result = {"google_business_owner_found": "no", "google_business_owner_name": "", "google_business_snippet": ""}
+    if use_google_business and config.USE_GOOGLE_BUSINESS_SEARCH:
+        google_business_result = search_google_business(
+            company_name=row.get("company_name", ""),
+            city=row.get("city", ""),
+            state=row.get("state", ""),
+        )
+
+    output["google_business_owner_found"] = google_business_result.get("google_business_owner_found", "no")
+    output["google_business_owner_name"]  = google_business_result.get("google_business_owner_name", "")
+
+    # --- Step 8h: Facebook Business page owner search (V9) ---
+    facebook_result = {"facebook_owner_found": "no", "facebook_owner_name": "", "facebook_source_url": ""}
+    if use_facebook and config.USE_FACEBOOK_SEARCH:
+        facebook_result = search_facebook_business(
+            company_name=row.get("company_name", ""),
+            city=row.get("city", ""),
+            state=row.get("state", ""),
+        )
+
+    output["facebook_owner_found"] = facebook_result.get("facebook_owner_found", "no")
+    output["facebook_owner_name"]  = facebook_result.get("facebook_owner_name", "")
+    output["facebook_source_url"]  = facebook_result.get("facebook_source_url", "")
+
+    # --- Step 8i: Press release mining (V9) ---
+    press_release_result = {"press_release_owner_found": "no", "press_release_owner_name": "", "press_release_owner_title": "", "press_release_snippet": ""}
+    if use_press_releases and config.USE_PRESS_RELEASE_SEARCH:
+        press_release_result = search_press_releases(
+            company_name=row.get("company_name", ""),
+            city=row.get("city", ""),
+            state=row.get("state", ""),
+        )
+
+    output["press_release_owner_found"]  = press_release_result.get("press_release_owner_found", "no")
+    output["press_release_owner_name"]   = press_release_result.get("press_release_owner_name", "")
+    output["press_release_owner_title"]  = press_release_result.get("press_release_owner_title", "")
+
+    # --- Step 8j: Crunchbase founder/CEO search (V9) ---
+    crunchbase_result = {"crunchbase_owner_found": "no", "crunchbase_owner_name": "", "crunchbase_owner_title": "", "crunchbase_source_url": ""}
+    if use_crunchbase and config.USE_CRUNCHBASE_SEARCH:
+        crunchbase_result = search_crunchbase(
+            company_name=row.get("company_name", ""),
+            city=row.get("city", ""),
+            state=row.get("state", ""),
+        )
+
+    output["crunchbase_owner_found"]  = crunchbase_result.get("crunchbase_owner_found", "no")
+    output["crunchbase_owner_name"]   = crunchbase_result.get("crunchbase_owner_name", "")
+    output["crunchbase_owner_title"]  = crunchbase_result.get("crunchbase_owner_title", "")
+    output["crunchbase_source_url"]   = crunchbase_result.get("crunchbase_source_url", "")
+
     # --- Step 9: Select the best person from all sources ---
     # Priority rules:
     #   A. If website extraction found a Tier 1 decision maker with strong score → use it
@@ -492,7 +573,7 @@ def process_row(
     person = extraction.primary  # default: use the website extraction result
 
     # Build external candidates (only if extraction didn't already win cleanly)
-    if not extraction_is_tier1 or extraction_score < config.SCORE_THRESHOLD_STRONG:
+    if not extraction_is_tier1 and extraction_score < config.SCORE_THRESHOLD_STRONG:
         external_candidates = []
 
         if yelp_result.get("yelp_owner_found") == "yes" and yelp_result.get("yelp_owner_name"):
@@ -562,6 +643,46 @@ def process_row(
                 snippet=f"LinkedIn profile: {linkedin_result.get('linkedin_source_url', '')}",
             )
             external_candidates.append(li_person)
+
+        # V9: Google Business Profile / Knowledge Panel
+        if google_business_result.get("google_business_owner_found") == "yes" and google_business_result.get("google_business_owner_name"):
+            gb_person = create_person_from_external(
+                name=google_business_result["google_business_owner_name"],
+                title="Business Owner",
+                source="google_business_search",
+                snippet=google_business_result.get("google_business_snippet", ""),
+            )
+            external_candidates.append(gb_person)
+
+        # V9: Facebook Business page
+        if facebook_result.get("facebook_owner_found") == "yes" and facebook_result.get("facebook_owner_name"):
+            fb_person = create_person_from_external(
+                name=facebook_result["facebook_owner_name"],
+                title="Business Owner",
+                source="facebook_search",
+                snippet=f"Facebook page: {facebook_result.get('facebook_source_url', '')}",
+            )
+            external_candidates.append(fb_person)
+
+        # V9: Press release mining
+        if press_release_result.get("press_release_owner_found") == "yes" and press_release_result.get("press_release_owner_name"):
+            pr_person = create_person_from_external(
+                name=press_release_result["press_release_owner_name"],
+                title=press_release_result.get("press_release_owner_title", "") or "Executive",
+                source="press_release_search",
+                snippet=press_release_result.get("press_release_snippet", ""),
+            )
+            external_candidates.append(pr_person)
+
+        # V9: Crunchbase founder/CEO
+        if crunchbase_result.get("crunchbase_owner_found") == "yes" and crunchbase_result.get("crunchbase_owner_name"):
+            cb_person = create_person_from_external(
+                name=crunchbase_result["crunchbase_owner_name"],
+                title=crunchbase_result.get("crunchbase_owner_title", "") or "Founder",
+                source="crunchbase_search",
+                snippet=f"Crunchbase: {crunchbase_result.get('crunchbase_source_url', '')}",
+            )
+            external_candidates.append(cb_person)
 
         if external_candidates:
             # Pick the highest-scoring external candidate
@@ -767,6 +888,8 @@ def run_pipeline(
     output_path: str,
     use_ai: bool = False,
     api_key: str = "",
+    ai_provider: str = "claude",
+    openrouter_key: str = "",
     use_yelp: bool = True,
     use_ddg: bool = True,
     use_bbb: bool = True,
@@ -779,6 +902,10 @@ def run_pipeline(
     use_google_maps: bool = True,
     use_linkedin: bool = True,
     use_smtp_verify: bool = True,
+    use_google_business: bool = True,
+    use_facebook: bool = True,
+    use_press_releases: bool = True,
+    use_crunchbase: bool = True,
     resume: bool = False,
     dedup: bool = True,
     progress_callback: Optional[Callable[[int, int, str, int, int], None]] = None,
@@ -831,6 +958,8 @@ def run_pipeline(
                     row,
                     use_ai=use_ai,
                     api_key=api_key,
+                    ai_provider=ai_provider,
+                    openrouter_key=openrouter_key,
                     use_yelp=use_yelp,
                     use_ddg=use_ddg,
                     use_bbb=use_bbb,
@@ -842,6 +971,10 @@ def run_pipeline(
                     use_google_maps=use_google_maps,
                     use_linkedin=use_linkedin,
                     use_smtp_verify=use_smtp_verify,
+                    use_google_business=use_google_business,
+                    use_facebook=use_facebook,
+                    use_press_releases=use_press_releases,
+                    use_crunchbase=use_crunchbase,
                 )
             except Exception as e:
                 result = {col: "" for col in OUTPUT_COLUMNS}

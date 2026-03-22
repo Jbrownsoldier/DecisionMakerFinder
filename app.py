@@ -51,7 +51,8 @@ def _update_job(job_id: str, **kwargs):
 def index():
     """Serve the main UI page."""
     default_key = config.ANTHROPIC_API_KEY or ""
-    return render_template("index.html", default_api_key=default_key)
+    default_or_key = config.OPENROUTER_API_KEY or ""
+    return render_template("index.html", default_api_key=default_key, default_openrouter_key=default_or_key)
 
 
 @app.route("/run", methods=["POST"])
@@ -71,6 +72,8 @@ def run():
     # --- Read settings from form ---
     use_ai           = request.form.get("use_ai",           "false").lower() == "true"
     api_key          = request.form.get("api_key",          "").strip()
+    ai_provider      = request.form.get("ai_provider",      "claude").strip()
+    openrouter_key   = request.form.get("openrouter_api_key", "").strip()
     use_yelp         = request.form.get("use_yelp",         "true").lower()  == "true"
     use_ddg          = request.form.get("use_ddg",          "true").lower()  == "true"
     use_bbb          = request.form.get("use_bbb",          "true").lower()  == "true"
@@ -81,11 +84,18 @@ def run():
     use_homestars    = request.form.get("use_homestars",    "true").lower()  == "true"
     use_yellowpages  = request.form.get("use_yellowpages",  "true").lower()  == "true"
     use_google_maps  = request.form.get("use_google_maps",  "true").lower()  == "true"
-    use_linkedin     = request.form.get("use_linkedin",     "true").lower()  == "true"
-    use_smtp_verify  = request.form.get("use_smtp_verify",  "true").lower()  == "true"
+    use_linkedin          = request.form.get("use_linkedin",          "true").lower()  == "true"
+    use_smtp_verify       = request.form.get("use_smtp_verify",       "true").lower()  == "true"
+    use_google_business   = request.form.get("use_google_business",   "true").lower()  == "true"
+    use_facebook          = request.form.get("use_facebook",          "true").lower()  == "true"
+    use_press_releases    = request.form.get("use_press_releases",    "true").lower()  == "true"
+    use_crunchbase        = request.form.get("use_crunchbase",        "true").lower()  == "true"
 
-    if use_ai and not api_key:
-        return jsonify({"error": "An Anthropic API key is required when AI fallback is enabled"}), 400
+    if use_ai:
+        if ai_provider == "openrouter" and not openrouter_key:
+            return jsonify({"error": "An OpenRouter API key is required when AI provider is set to OpenRouter"}), 400
+        elif ai_provider != "openrouter" and not api_key:
+            return jsonify({"error": "An Anthropic API key is required when AI fallback is enabled"}), 400
 
     # --- Parse uploaded CSV ---
     try:
@@ -142,6 +152,8 @@ def run():
                 output_path=output_path,
                 use_ai=use_ai,
                 api_key=api_key,
+                ai_provider=ai_provider,
+                openrouter_key=openrouter_key,
                 use_yelp=use_yelp,
                 use_ddg=use_ddg,
                 use_bbb=use_bbb,
@@ -154,6 +166,10 @@ def run():
                 use_google_maps=use_google_maps,
                 use_linkedin=use_linkedin,
                 use_smtp_verify=use_smtp_verify,
+                use_google_business=use_google_business,
+                use_facebook=use_facebook,
+                use_press_releases=use_press_releases,
+                use_crunchbase=use_crunchbase,
                 resume=False,
                 dedup=True,
                 progress_callback=progress_callback,
