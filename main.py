@@ -324,6 +324,40 @@ def process_row(
 
     output["generated_at"] = now_utc
 
+    # --- Step 1b: Domain-based routing adjustments ---
+    # Detect Canadian companies (.ca TLD) and adjust source strategy accordingly:
+    #   - Yelp defaults to "United States" when no city is given → useless for Canada
+    #   - BBB Canada has very sparse data vs BBB USA → low yield for .ca companies
+    #   - HomeStars + YellowPages CA are the right sources for Canadian trades
+    # When city/state are empty we also infer a fallback location for searches.
+    _domain_lower = (domain or "").lower()
+    _country_row  = row.get("country", "").lower()
+    _is_canadian  = _domain_lower.endswith(".ca") or _country_row in ("canada", "ca")
+    _city  = row.get("city", "").strip()
+    _state = row.get("state", "").strip()
+
+    if _is_canadian:
+        # For Canadian companies with no city, skip US-focused sources silently
+        # (don't override the user toggle — just don't waste time calling them
+        #  when they'll search against "United States" anyway)
+        if not _city and not _state:
+            use_yelp = False
+            use_bbb  = False
+        # Always bump Canadian-specific sources on when processing .ca companies
+        # (unless the user explicitly turned them off AND there's a reason to)
+        # → leave homestars/yellowpages as whatever the user set
+
+    # Build a location-aware fallback for searches.
+    # When city/state are blank but we know the country, inject that so external
+    # sources search in the right geography rather than defaulting to US.
+    _search_city  = _city
+    _search_state = _state
+    if not _search_city and not _search_state:
+        if _is_canadian:
+            _search_state = "Canada"
+        elif _country_row in ("usa", "us", "united states"):
+            _search_state = "United States"
+
     # --- Step 2: Validate minimum required data ---
     if not domain and not website:
         output["processing_status"] = "missing_domain"
@@ -411,14 +445,24 @@ def process_row(
         ai_provider=ai_provider,
     )
 
+    # ---------------------------------------------------------------------------
+    # External source searches (Steps 7–8j)
+    # Each source makes 1-2 HTTP requests. Running 10+ sources back-to-back
+    # against DuckDuckGo will trigger rate-limiting — we insert a short pause
+    # between EACH source call (_EXT_DELAY seconds) to stay polite.
+    # Total added latency per company ≈ 10 sources × 0.8s = ~8s (acceptable).
+    # ---------------------------------------------------------------------------
+    _EXT_DELAY = 0.8  # seconds between each external source call
+
     # --- Step 7: Yelp search for business owner name (free) ---
     yelp_result = {"yelp_owner_found": "no", "yelp_owner_name": "",
                    "yelp_owner_title": "", "yelp_source_url": "", "yelp_snippet": ""}
+    time.sleep(_EXT_DELAY)
     if use_yelp and config.USE_YELP_SEARCH:
         yelp_result = search_yelp(
             company_name=row.get("company_name", ""),
-            city=row.get("city", ""),
-            state=row.get("state", ""),
+            city=_search_city,
+            state=_search_state,
         )
 
     output["yelp_owner_found"] = yelp_result.get("yelp_owner_found", "no")
@@ -428,11 +472,12 @@ def process_row(
     # --- Step 8: DuckDuckGo SERP search (free) ---
     ddg_result = {"serp_person_found": "no", "serp_decision_maker": "",
                   "serp_title": "", "serp_snippet": "", "serp_source_url": ""}
+    time.sleep(_EXT_DELAY)
     if use_ddg and config.USE_DDG_SEARCH:
         ddg_result = search_ddg(
             company_name=row.get("company_name", ""),
-            city=row.get("city", ""),
-            state=row.get("state", ""),
+            city=_search_city,
+            state=_search_state,
         )
 
     output["serp_person_found"]   = ddg_result.get("serp_person_found", "no")
@@ -441,11 +486,12 @@ def process_row(
 
     # --- Step 8b: BBB business principal search (free, US businesses) ---
     bbb_result = {"bbb_owner_found": "no", "bbb_owner_name": "", "bbb_source_url": ""}
+    time.sleep(_EXT_DELAY)
     if use_bbb and config.USE_BBB_SEARCH:
         bbb_result = search_bbb(
             company_name=row.get("company_name", ""),
-            city=row.get("city", ""),
-            state=row.get("state", ""),
+            city=_search_city,
+            state=_search_state,
         )
 
     output["bbb_owner_found"] = bbb_result.get("bbb_owner_found", "no")
@@ -454,11 +500,12 @@ def process_row(
 
     # --- Step 8c: HomeStars.ca search (Canadian trades directory) ---
     homestars_result = {"homestars_owner_found": "no", "homestars_owner_name": "", "homestars_source_url": ""}
+    time.sleep(_EXT_DELAY)
     if use_homestars and config.USE_HOMESTARS_SEARCH:
         homestars_result = search_homestars(
             company_name=row.get("company_name", ""),
-            city=row.get("city", ""),
-            state=row.get("state", ""),
+            city=_search_city,
+            state=_search_state,
         )
 
     output["homestars_owner_found"] = homestars_result.get("homestars_owner_found", "no")
@@ -467,11 +514,12 @@ def process_row(
 
     # --- Step 8d: YellowPages Canada search ---
     yellowpages_result = {"yellowpages_owner_found": "no", "yellowpages_owner_name": "", "yellowpages_source_url": ""}
+    time.sleep(_EXT_DELAY)
     if use_yellowpages and config.USE_YELLOWPAGES_CA_SEARCH:
         yellowpages_result = search_yellowpages_ca(
             company_name=row.get("company_name", ""),
-            city=row.get("city", ""),
-            state=row.get("state", ""),
+            city=_search_city,
+            state=_search_state,
         )
 
     output["yellowpages_owner_found"] = yellowpages_result.get("yellowpages_owner_found", "no")
@@ -480,11 +528,12 @@ def process_row(
 
     # --- Step 8e: Google Maps owner response search ---
     google_maps_result = {"google_maps_owner_found": "no", "google_maps_owner_name": "", "google_maps_snippet": ""}
+    time.sleep(_EXT_DELAY)
     if use_google_maps and config.USE_GOOGLE_MAPS_SEARCH:
         google_maps_result = search_google_maps_owner(
             company_name=row.get("company_name", ""),
-            city=row.get("city", ""),
-            state=row.get("state", ""),
+            city=_search_city,
+            state=_search_state,
         )
 
     output["google_maps_owner_found"] = google_maps_result.get("google_maps_owner_found", "no")
@@ -494,11 +543,12 @@ def process_row(
     # --- Step 8f: LinkedIn via Google search (V8) ---
     linkedin_result = {"linkedin_owner_found": "no", "linkedin_owner_name": "",
                        "linkedin_owner_title": "", "linkedin_source_url": ""}
+    time.sleep(_EXT_DELAY)
     if use_linkedin and config.USE_LINKEDIN_SEARCH:
         linkedin_result = search_linkedin_google(
             company_name=row.get("company_name", ""),
-            city=row.get("city", ""),
-            state=row.get("state", ""),
+            city=_search_city,
+            state=_search_state,
         )
 
     output["linkedin_owner_found"] = linkedin_result.get("linkedin_owner_found", "no")
@@ -508,11 +558,12 @@ def process_row(
 
     # --- Step 8g: Google Business Profile / Knowledge Panel (V9) ---
     google_business_result = {"google_business_owner_found": "no", "google_business_owner_name": "", "google_business_snippet": ""}
+    time.sleep(_EXT_DELAY)
     if use_google_business and config.USE_GOOGLE_BUSINESS_SEARCH:
         google_business_result = search_google_business(
             company_name=row.get("company_name", ""),
-            city=row.get("city", ""),
-            state=row.get("state", ""),
+            city=_search_city,
+            state=_search_state,
         )
 
     output["google_business_owner_found"] = google_business_result.get("google_business_owner_found", "no")
@@ -520,11 +571,12 @@ def process_row(
 
     # --- Step 8h: Facebook Business page owner search (V9) ---
     facebook_result = {"facebook_owner_found": "no", "facebook_owner_name": "", "facebook_source_url": ""}
+    time.sleep(_EXT_DELAY)
     if use_facebook and config.USE_FACEBOOK_SEARCH:
         facebook_result = search_facebook_business(
             company_name=row.get("company_name", ""),
-            city=row.get("city", ""),
-            state=row.get("state", ""),
+            city=_search_city,
+            state=_search_state,
         )
 
     output["facebook_owner_found"] = facebook_result.get("facebook_owner_found", "no")
@@ -533,11 +585,12 @@ def process_row(
 
     # --- Step 8i: Press release mining (V9) ---
     press_release_result = {"press_release_owner_found": "no", "press_release_owner_name": "", "press_release_owner_title": "", "press_release_snippet": ""}
+    time.sleep(_EXT_DELAY)
     if use_press_releases and config.USE_PRESS_RELEASE_SEARCH:
         press_release_result = search_press_releases(
             company_name=row.get("company_name", ""),
-            city=row.get("city", ""),
-            state=row.get("state", ""),
+            city=_search_city,
+            state=_search_state,
         )
 
     output["press_release_owner_found"]  = press_release_result.get("press_release_owner_found", "no")
@@ -546,11 +599,12 @@ def process_row(
 
     # --- Step 8j: Crunchbase founder/CEO search (V9) ---
     crunchbase_result = {"crunchbase_owner_found": "no", "crunchbase_owner_name": "", "crunchbase_owner_title": "", "crunchbase_source_url": ""}
+    time.sleep(_EXT_DELAY)
     if use_crunchbase and config.USE_CRUNCHBASE_SEARCH:
         crunchbase_result = search_crunchbase(
             company_name=row.get("company_name", ""),
-            city=row.get("city", ""),
-            state=row.get("state", ""),
+            city=_search_city,
+            state=_search_state,
         )
 
     output["crunchbase_owner_found"]  = crunchbase_result.get("crunchbase_owner_found", "no")

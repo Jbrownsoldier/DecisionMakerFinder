@@ -231,6 +231,11 @@ USE_AI_FALLBACK              = False  # Claude Haiku (requires API key)
 
 ## Changelog
 
+### V9.1 — Extraction Accuracy Fixes (White-Collar Niches)
+- **Testimonial false positive fix:** added `_TESTIMONIAL_CLASS_HINTS` regex + `_is_inside_testimonial()` tree-walker — client quote sections (testimonials, case studies, social proof) are now skipped entirely during HTML card extraction. Eliminates the most common false positive on agency/consulting sites.
+- **Title bleed fix:** role keywords that bled into the captured name string (`"Garrett Mehrguth Chief Executive Officer"`) are now stripped post-capture, falling back to first two title-cased words if needed.
+- **Expanded business-word blacklist:** 30+ white-collar company descriptor words added (`media`, `digital`, `marketing`, `advertising`, `consulting`, `analytics`, `creative`, `technology`, `studio`, `labs`, `collective`, etc.) so agency and tech company names don't produce false name matches.
+
 ### V9 — New Sources + LinkedIn Profile Fetch
 - **4 new decision maker sources:** Google Business Profile, Facebook Business, Press Release Mining, Crunchbase
 - **LinkedIn Jina enhancement:** after finding a LinkedIn URL via DDG, fetches the full profile via Jina for more accurate name + title extraction

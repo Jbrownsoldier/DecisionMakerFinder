@@ -108,6 +108,19 @@ _BUSINESS_WORDS = {
     "ottawa", "montreal", "calgary", "edmonton", "vancouver",
     # US geography that commonly appears in company names
     "america", "american", "national", "united",
+    # White-collar / agency / tech company descriptor words
+    # These appear in company names (e.g. "Hawke Media", "Disruptive Advertising")
+    # but are never part of a real person's name.
+    "media", "digital", "marketing", "advertising", "consulting",
+    "communications", "communication", "design", "creative", "technology",
+    "tech", "analytics", "social", "brand", "branding", "strategy",
+    "growth", "performance", "optimization", "content", "web", "mobile",
+    "cloud", "software", "platform", "networks", "network", "global",
+    "interactive", "productions", "production", "publishing", "studio",
+    "studios", "labs", "lab", "works", "workshop", "collective",
+    "development", "innovations", "innovation", "intelligence",
+    "visibility", "ignite", "disruptive", "directive", "metric",
+    "boost", "grain", "sculpt", "stratabeat", "brafton", "hawke",
 }
 
 
@@ -336,6 +349,16 @@ _TEAM_CLASS_HINTS = re.compile(
     re.IGNORECASE,
 )
 
+# Class/id patterns that indicate a testimonial / social-proof section.
+# Elements inside these containers are customer quotes, NOT employees.
+# e.g. "Kim Cooper, Director of Marketing at Amazon Alexa" → skip entirely.
+_TESTIMONIAL_CLASS_HINTS = re.compile(
+    r"(testimonial|quote|review|case.?stud|client.?quote|client.?say|"
+    r"social.?proof|trust|endorsement|what.?our|happy.?client|"
+    r"success.?stor|customer.?stor|partner.?say|hear.?from)",
+    re.IGNORECASE,
+)
+
 
 def _element_class_str(el) -> str:
     classes = el.get("class", [])
@@ -347,9 +370,31 @@ def _find_team_containers(soup: BeautifulSoup) -> list:
     for tag in soup.find_all(["section", "div", "article", "ul", "li"]):
         class_str = _element_class_str(tag).lower()
         id_str = str(tag.get("id", "")).lower()
-        if _TEAM_CLASS_HINTS.search(class_str + " " + id_str):
+        combined = class_str + " " + id_str
+        # Skip sections that are testimonial / client-quote blocks
+        if _TESTIMONIAL_CLASS_HINTS.search(combined):
+            continue
+        if _TEAM_CLASS_HINTS.search(combined):
             containers.append(tag)
     return containers
+
+
+def _is_inside_testimonial(el) -> bool:
+    """Return True if `el` is nested inside a testimonial/quote/review block."""
+    node = el
+    for _ in range(8):  # walk up max 8 levels
+        if node is None:
+            break
+        tag_name = getattr(node, "name", None)
+        # blockquote and figure are the semantic HTML containers for quotes
+        if tag_name in ("blockquote", "figure", "cite"):
+            return True
+        class_str = _element_class_str(node).lower()
+        id_str = str(node.get("id", "")).lower() if hasattr(node, "get") else ""
+        if _TESTIMONIAL_CLASS_HINTS.search(class_str + " " + id_str):
+            return True
+        node = getattr(node, "parent", None)
+    return False
 
 
 def _extract_html_cards(soup: BeautifulSoup, page_path: str,
@@ -370,6 +415,10 @@ def _extract_html_cards(soup: BeautifulSoup, page_path: str,
                 role_els.append(el)
 
         for role_el in role_els:
+            # Skip any role element that lives inside a testimonial / quote block
+            if _is_inside_testimonial(role_el):
+                continue
+
             role_text = role_el.get_text(" ", strip=True)
             if not _ROLE_PATTERN.search(role_text):
                 continue
@@ -405,6 +454,20 @@ def _extract_html_cards(soup: BeautifulSoup, page_path: str,
                 m = _NAME_PATTERN.search(remainder)
                 if m and len(remainder) < 100:
                     name_str = m.group(0)
+
+            # Strip role keywords that bled into the name string.
+            # e.g. "Garrett Mehrguth Chief Executive Officer" → "Garrett Mehrguth"
+            if name_str:
+                cleaned = _ROLE_PATTERN.sub("", name_str).strip("- ,|:.")
+                # Only use the cleaned version if it still has ≥2 words
+                if cleaned and len(cleaned.split()) >= 2:
+                    name_str = cleaned
+                elif len(name_str.split()) >= 2:
+                    # Fallback: take first two title-cased words only
+                    words = name_str.split()
+                    two_word = " ".join(words[:2])
+                    if _is_plausible_person_name(two_word):
+                        name_str = two_word
 
             if name_str and _is_plausible_person_name(name_str):
                 # Build a short snippet of surrounding context
@@ -510,9 +573,13 @@ def _extract_text_regex(text: str, page_path: str) -> list[ExtractedPerson]:
 # ---------------------------------------------------------------------------
 
 # Copyright line: "© 2024 John Smith Plumbing" or "Copyright 2023 Jane Doe LLC"
+# NOTE: No re.IGNORECASE — we intentionally require the name to start with a real
+# capital letter so "©2016 by Strong Plumbing Inc" does NOT match (lowercase "by").
+# The optional (?:by\s+)? consumes a lowercase "by" written before the company name
+# so "© 2024 by John Smith Plumbing" still matches "John Smith Plumbing".
 _COPYRIGHT_RE = re.compile(
-    r"(?:©|\bCopyright\b)\s*\d{4}\s+([A-Z][a-zA-Z'\-]{1,20}(?:\s+[A-Z][a-zA-Z'\-]{1,20}){1,3})",
-    re.IGNORECASE,
+    r"(?:©|&copy;|\bCopyright\b)\s*\d{0,4}\s*(?:by\s+)?"
+    r"([A-Z][a-zA-Z'\-]{1,20}(?:\s+[A-Z][a-zA-Z'\-]{1,20}){1,3})"
 )
 
 # Contact-block signature: "John Smith | Owner | john@company.com"

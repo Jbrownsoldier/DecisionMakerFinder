@@ -98,6 +98,15 @@ _BUSINESS_WORDS = {
     "ottawa", "montreal", "calgary", "edmonton", "vancouver",
     # US geography that commonly appears in company names
     "america", "american", "national", "united",
+    # White-collar / agency / tech company descriptor words
+    "media", "digital", "marketing", "advertising", "consulting",
+    "communications", "communication", "design", "creative", "technology",
+    "tech", "analytics", "social", "brand", "branding", "strategy",
+    "growth", "performance", "optimization", "content", "web", "mobile",
+    "cloud", "software", "platform", "networks", "network", "global",
+    "interactive", "productions", "production", "publishing", "studio",
+    "studios", "labs", "lab", "works", "workshop", "collective",
+    "development", "innovations", "innovation", "intelligence",
 }
 
 
